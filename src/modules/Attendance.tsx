@@ -104,6 +104,19 @@ export const Attendance: React.FC = () => {
   const [newShiftEnd, setNewShiftEnd] = useState('06:30 PM');
   const [newShiftColor, setNewShiftColor] = useState('#6366f1');
 
+  // Shift Assignment States (Inside Add Shift & Standalone Modal)
+  const [createAssignMode, setCreateAssignMode] = useState<'none' | 'single' | 'bulk'>('none');
+  const [createAssignSingleEmpId, setCreateAssignSingleEmpId] = useState('');
+  const [createAssignBulkEmpIds, setCreateAssignBulkEmpIds] = useState<string[]>([]);
+  const [createAssignDays, setCreateAssignDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+
+  const [showAssignShiftModal, setShowAssignShiftModal] = useState(false);
+  const [assignShiftTargetName, setAssignShiftTargetName] = useState('General');
+  const [assignType, setAssignType] = useState<'single' | 'bulk'>('single');
+  const [assignSingleEmpId, setAssignSingleEmpId] = useState('');
+  const [assignBulkEmpIds, setAssignBulkEmpIds] = useState<string[]>([]);
+  const [assignSelectedDays, setAssignSelectedDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+
   const handleCreateShiftTiming = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newShiftName.trim() || !newShiftCode.trim()) {
@@ -115,11 +128,12 @@ export const Attendance: React.FC = () => {
     const startHour = newShiftStart.trim().split(':')[0] || '09';
     const endHour = newShiftEnd.trim().split(':')[0] || '18';
     const shortLabel = `${codeUpper.slice(0, 3)} (${startHour}-${endHour})`;
+    const shiftNameClean = newShiftName.trim();
 
     createShiftTimingMut.mutate(
       {
         code: codeUpper,
-        name: newShiftName.trim(),
+        name: shiftNameClean,
         startTime: newShiftStart.trim(),
         endTime: newShiftEnd.trim(),
         shortLabel,
@@ -129,10 +143,42 @@ export const Attendance: React.FC = () => {
       },
       {
         onSuccess: () => {
-          addAuditLog('Created Organization Shift', 'Attendance Module', `Added new shift timing ${newShiftName} (${newShiftStart} - ${newShiftEnd})`);
-          showAlert(`Organization shift "${newShiftName}" saved successfully!`, 'Shift Added', 'success');
+          let assignedCount = 0;
+          if (createAssignMode === 'single' && createAssignSingleEmpId) {
+            setEmployeeShifts(prev => {
+              const updated = { ...prev };
+              const currentDays = updated[createAssignSingleEmpId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
+              const newDays = { ...currentDays };
+              createAssignDays.forEach(day => { newDays[day] = shiftNameClean; });
+              updated[createAssignSingleEmpId] = newDays;
+              return updated;
+            });
+            assignedCount = 1;
+          } else if (createAssignMode === 'bulk' && createAssignBulkEmpIds.length > 0) {
+            setEmployeeShifts(prev => {
+              const updated = { ...prev };
+              createAssignBulkEmpIds.forEach(empId => {
+                const currentDays = updated[empId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
+                const newDays = { ...currentDays };
+                createAssignDays.forEach(day => { newDays[day] = shiftNameClean; });
+                updated[empId] = newDays;
+              });
+              return updated;
+            });
+            assignedCount = createAssignBulkEmpIds.length;
+          }
+
+          addAuditLog('Created Organization Shift', 'Attendance Module', `Added new shift timing ${shiftNameClean} (${newShiftStart} - ${newShiftEnd})`);
+          showAlert(
+            `Organization shift "${shiftNameClean}" saved successfully${assignedCount > 0 ? ` and assigned to ${assignedCount} employee(s)!` : '!'}`,
+            'Shift Added',
+            'success'
+          );
           setNewShiftName('');
           setNewShiftCode('');
+          setCreateAssignMode('none');
+          setCreateAssignSingleEmpId('');
+          setCreateAssignBulkEmpIds([]);
           setShowAddShiftModal(false);
         },
         onError: (err: any) => {
@@ -140,6 +186,49 @@ export const Attendance: React.FC = () => {
         },
       }
     );
+  };
+
+  const handleApplyShiftAssignment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignShiftTargetName) {
+      showAlert('Please select a shift to assign.', 'Validation Error', 'warning');
+      return;
+    }
+    if (assignSelectedDays.length === 0) {
+      showAlert('Please select at least one day.', 'Validation Error', 'warning');
+      return;
+    }
+
+    const targetEmpIds: string[] = [];
+    if (assignType === 'single') {
+      if (!assignSingleEmpId) {
+        showAlert('Please select an employee.', 'Validation Error', 'warning');
+        return;
+      }
+      targetEmpIds.push(assignSingleEmpId);
+    } else {
+      if (assignBulkEmpIds.length === 0) {
+        showAlert('Please select at least one employee for bulk assignment.', 'Validation Error', 'warning');
+        return;
+      }
+      targetEmpIds.push(...assignBulkEmpIds);
+    }
+
+    setEmployeeShifts(prev => {
+      const updated = { ...prev };
+      targetEmpIds.forEach(empId => {
+        const currentDays = updated[empId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
+        const newDays = { ...currentDays };
+        assignSelectedDays.forEach(day => { newDays[day] = assignShiftTargetName; });
+        updated[empId] = newDays;
+      });
+      return updated;
+    });
+
+    const empCountStr = assignType === 'single' ? '1 employee' : `${targetEmpIds.length} employees`;
+    addAuditLog('Assigned Shift Roster', 'Attendance Module', `Assigned ${assignShiftTargetName} shift to ${empCountStr} for days [${assignSelectedDays.join(', ')}]`);
+    showAlert(`Successfully assigned "${assignShiftTargetName}" shift to ${empCountStr}!`, 'Shift Assigned', 'success');
+    setShowAssignShiftModal(false);
   };
 
   const handleDeleteShiftTiming = (id: string, name: string) => {
@@ -1313,6 +1402,19 @@ export const Attendance: React.FC = () => {
                 <span>+ Add Shift</span>
               </button>
 
+              {/* Assign Shift Button (Single & Bulk) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignShiftTargetName(shiftTimingsList[0]?.name || 'General');
+                  setShowAssignShiftModal(true);
+                }}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold shadow-sm hover:shadow transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Users className="h-3.5 w-3.5 text-white" />
+                <span>⚡ Assign Shift</span>
+              </button>
+
               {/* Save Button */}
               <button
                 type="button"
@@ -1357,7 +1459,7 @@ export const Attendance: React.FC = () => {
           {/* Add Shift Timing Modal */}
           {showAddShiftModal && (
             <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between border-b pb-3 border-slate-200 dark:border-slate-800">
                   <h3 className="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-2">
                     <Clock className="h-4 w-4 text-emerald-500" />
@@ -1418,6 +1520,117 @@ export const Attendance: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Optional Employee Shift Assignment during Creation */}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <label className="text-slate-700 dark:text-slate-300 font-bold text-xs block">
+                      Assign Shift to Employee(s) <span className="text-slate-400 font-normal text-[10px]">(Optional)</span>
+                    </label>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCreateAssignMode('none')}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] border cursor-pointer ${createAssignMode === 'none' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                      >
+                        Don't Assign
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCreateAssignMode('single')}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] border cursor-pointer ${createAssignMode === 'single' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                      >
+                        Single Employee
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCreateAssignMode('bulk')}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] border cursor-pointer ${createAssignMode === 'bulk' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                      >
+                        Bulk Employees
+                      </button>
+                    </div>
+
+                    {createAssignMode === 'single' && (
+                      <div className="space-y-1">
+                        <label className="text-slate-500 font-medium text-[10px]">Select Employee:</label>
+                        <select
+                          value={createAssignSingleEmpId}
+                          onChange={(e) => setCreateAssignSingleEmpId(e.target.value)}
+                          className="w-full px-3 py-2 border rounded-xl bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none"
+                        >
+                          <option value="">-- Choose Employee --</option>
+                          {employeesList.map(emp => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.name} ({emp.id}) - {emp.designation || 'Staff'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {createAssignMode === 'bulk' && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-slate-500 font-medium text-[10px]">Select Employees ({createAssignBulkEmpIds.length} selected):</label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (createAssignBulkEmpIds.length === employeesList.length) {
+                                setCreateAssignBulkEmpIds([]);
+                              } else {
+                                setCreateAssignBulkEmpIds(employeesList.map(e => e.id));
+                              }
+                            }}
+                            className="text-indigo-600 dark:text-indigo-400 font-bold text-[10px] hover:underline cursor-pointer"
+                          >
+                            {createAssignBulkEmpIds.length === employeesList.length ? 'Deselect All' : 'Select All'}
+                          </button>
+                        </div>
+                        <div className="max-h-32 overflow-y-auto border rounded-xl p-2 bg-white dark:bg-slate-900 space-y-1">
+                          {employeesList.map(emp => (
+                            <label key={emp.id} className="flex items-center gap-2 p-1 hover:bg-slate-50 dark:hover:bg-slate-800 rounded cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={createAssignBulkEmpIds.includes(emp.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setCreateAssignBulkEmpIds(prev => [...prev, emp.id]);
+                                  } else {
+                                    setCreateAssignBulkEmpIds(prev => prev.filter(id => id !== emp.id));
+                                  }
+                                }}
+                              />
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{emp.name}</span>
+                              <span className="text-[10px] text-slate-400">({emp.id})</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {createAssignMode !== 'none' && (
+                      <div className="space-y-1 pt-1">
+                        <label className="text-slate-500 font-medium text-[10px]">Assign Days:</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => {
+                                setCreateAssignDays(prev => 
+                                  prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+                                );
+                              }}
+                              className={`px-2 py-1 rounded text-[10px] font-bold border cursor-pointer ${createAssignDays.includes(day) ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                            >
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
                     <button
                       type="button"
@@ -1432,6 +1645,184 @@ export const Attendance: React.FC = () => {
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md disabled:opacity-50 cursor-pointer"
                     >
                       {createShiftTimingMut.isPending ? 'Saving...' : 'Save Organization Shift'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Standalone Single & Bulk Shift Assignment Modal */}
+          {showAssignShiftModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in text-xs">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between border-b pb-3 border-slate-200 dark:border-slate-800">
+                  <h3 className="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-2">
+                    <Users className="h-4 w-4 text-purple-500" />
+                    <span>Assign Shift to Employee(s)</span>
+                  </h3>
+                  <button onClick={() => setShowAssignShiftModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleApplyShiftAssignment} className="space-y-4">
+                  {/* Select Shift */}
+                  <div className="space-y-1">
+                    <label className="text-slate-500 font-bold uppercase text-[10px]">Select Shift to Assign *</label>
+                    <select
+                      value={assignShiftTargetName}
+                      onChange={(e) => setAssignShiftTargetName(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none font-bold"
+                    >
+                      <option value="General">General (09:30 AM - 06:30 PM)</option>
+                      <option value="Morning">Morning (06:00 AM - 02:30 PM)</option>
+                      <option value="Evening">Evening (02:00 PM - 10:30 PM)</option>
+                      <option value="Night">Night (10:00 PM - 06:30 AM)</option>
+                      <option value="Week Off">Week Off</option>
+                      {shiftTimingsList.map(st => (
+                        <option key={st.id || st.name} value={st.name}>
+                          {st.name} ({st.startTime} - {st.endTime})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Assignment Type Toggle */}
+                  <div className="space-y-1.5">
+                    <label className="text-slate-500 font-bold uppercase text-[10px]">Assignment Type *</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAssignType('single')}
+                        className={`py-2 px-3 rounded-xl font-bold border flex items-center justify-center gap-1.5 cursor-pointer ${assignType === 'single' ? 'bg-purple-600 text-white border-purple-600 shadow-sm' : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                      >
+                        <span>Single Employee</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAssignType('bulk')}
+                        className={`py-2 px-3 rounded-xl font-bold border flex items-center justify-center gap-1.5 cursor-pointer ${assignType === 'bulk' ? 'bg-purple-600 text-white border-purple-600 shadow-sm' : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                      >
+                        <span>Bulk Employees ({assignBulkEmpIds.length})</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Employee Selection */}
+                  {assignType === 'single' ? (
+                    <div className="space-y-1">
+                      <label className="text-slate-500 font-bold uppercase text-[10px]">Select Employee *</label>
+                      <select
+                        value={assignSingleEmpId}
+                        onChange={(e) => setAssignSingleEmpId(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                      >
+                        <option value="">-- Choose Employee --</option>
+                        {employeesList.map(emp => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.name} ({emp.id}) - {emp.designation || 'Staff'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-slate-500 font-bold uppercase text-[10px]">Select Employees ({assignBulkEmpIds.length} Selected) *</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (assignBulkEmpIds.length === employeesList.length) {
+                              setAssignBulkEmpIds([]);
+                            } else {
+                              setAssignBulkEmpIds(employeesList.map(e => e.id));
+                            }
+                          }}
+                          className="text-purple-600 dark:text-purple-400 font-extrabold text-[10px] hover:underline cursor-pointer"
+                        >
+                          {assignBulkEmpIds.length === employeesList.length ? 'Deselect All' : 'Select All Employees'}
+                        </button>
+                      </div>
+
+                      <div className="max-h-44 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 bg-slate-50/50 dark:bg-slate-950/50 space-y-1">
+                        {employeesList.map(emp => (
+                          <label key={emp.id} className="flex items-center gap-2.5 p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={assignBulkEmpIds.includes(emp.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setAssignBulkEmpIds(prev => [...prev, emp.id]);
+                                } else {
+                                  setAssignBulkEmpIds(prev => prev.filter(id => id !== emp.id));
+                                }
+                              }}
+                              className="rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-bold text-slate-800 dark:text-slate-200">{emp.name}</span>
+                              <span className="text-[10px] text-slate-400">{emp.id} • {emp.designation || 'Staff'}</span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Days Selection */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-slate-500 font-bold uppercase text-[10px]">Select Target Days *</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAssignSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri'])}
+                          className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
+                        >
+                          Mon-Fri
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAssignSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])}
+                          className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
+                        >
+                          All Days
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => {
+                            setAssignSelectedDays(prev => 
+                              prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+                            );
+                          }}
+                          className={`px-3 py-1.5 rounded-xl font-extrabold border text-xs cursor-pointer transition-all ${assignSelectedDays.includes(day) ? 'bg-purple-600 text-white border-purple-600 shadow-xs' : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
+                        >
+                          {day}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowAssignShiftModal(false)}
+                      className="px-4 py-2 border rounded-xl text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold shadow-md hover:shadow-lg transition-all cursor-pointer"
+                    >
+                      Apply & Assign Shift
                     </button>
                   </div>
                 </form>
@@ -1511,6 +1902,11 @@ export const Attendance: React.FC = () => {
                                   <option value="Evening" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Evening</option>
                                   <option value="Night" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Night</option>
                                   <option value="Week Off" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Week Off</option>
+                                  {shiftTimingsList.map(st => (
+                                    <option key={st.id || st.code} value={st.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                      {st.name}
+                                    </option>
+                                  ))}
                                 </select>
                               </td>
                             );

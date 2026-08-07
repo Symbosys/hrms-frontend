@@ -1,10 +1,7 @@
 import axios from "axios";
 
-
-
 // export const BASE_URL = "http://192.168.1.7:5000/api/v1";
 // export const IMAGE_BASE_URL = "http://192.168.1.8:5000"; //
-
 
 export const BASE_URL = "https://lime-beaver-798212.hostingersite.com/api/v1";
 export const IMAGE_BASE_URL = "https://lime-beaver-798212.hostingersite.com";
