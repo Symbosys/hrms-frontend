@@ -250,6 +250,50 @@ export const Attendance: React.FC = () => {
 
   // Shift & Geofence Validation for Punch Submit
   const validatePunchRestrictions = (): boolean => {
+    // 0. ALREADY PUNCHED IN / OUT VALIDATION
+    const todayStr = new Date().toDateString();
+    const todayPunches = punchLogList
+      .filter((p: any) => {
+        if (!p) return false;
+        let pDate: Date | null = null;
+        if (p.createdAt) {
+          const d = new Date(p.createdAt);
+          if (!isNaN(d.getTime())) pDate = d;
+        }
+        if (!pDate && p.time) {
+          const d = new Date(p.time);
+          if (!isNaN(d.getTime())) pDate = d;
+        }
+        if (!pDate) pDate = new Date();
+        return pDate.toDateString() === todayStr;
+      })
+      .sort((a: any, b: any) => {
+        const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return da - db;
+      });
+
+    const lastPunchToday = todayPunches.length > 0 ? todayPunches[todayPunches.length - 1] : null;
+    const lastType = (lastPunchToday?.type || '').toLowerCase();
+
+    if (punchType === 'In' && lastType.includes('in')) {
+      showAlert(
+        'You are already punched in!',
+        'Punch Restriction ⚠️',
+        'warning'
+      );
+      return false;
+    }
+
+    if (punchType === 'Out' && (!lastPunchToday || lastType.includes('out'))) {
+      showAlert(
+        'You are already punched out!',
+        'Punch Restriction ⚠️',
+        'warning'
+      );
+      return false;
+    }
+
     // 1. SHIFT TIMING VALIDATION
     const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'short' });
     const empShiftToday = employeeShifts[selectedEmpId]?.[todayDayName] || 'General';
@@ -1320,26 +1364,40 @@ export const Attendance: React.FC = () => {
                 <div className="py-8 text-center text-slate-400 font-medium italic">No check-in or out punches recorded yet.</div>
               ) : (
                 <div className="grid grid-cols-1 gap-2.5 max-h-[300px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
-                  {punchLogList.map((log) => (
-                    <div key={log.id} className="p-3 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between bg-slate-50 dark:bg-slate-900/30 gap-4 text-xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors shadow-sm">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${
-                          log.type === 'In' 
-                            ? 'bg-green-50 text-green-600 dark:bg-green-950/40 dark:text-green-400' 
-                            : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
-                        }`}>
-                          <Clock className="h-4 w-4" />
+                  {punchLogList.map((log) => {
+                    const getDisplayPunchTime = (item: any) => {
+                      if (item.createdAt) {
+                        const d = new Date(item.createdAt);
+                        if (!isNaN(d.getTime())) {
+                          const isToday = new Date().toDateString() === d.toDateString();
+                          const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          return isToday ? `Today, ${timeStr}` : `${d.toLocaleDateString([], { month: 'short', day: '2-digit' })}, ${timeStr}`;
+                        }
+                      }
+                      return item.time || '--:--';
+                    };
+                    const formattedPunchTime = getDisplayPunchTime(log);
+                    return (
+                      <div key={log.id} className="p-3 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between bg-slate-50 dark:bg-slate-900/30 gap-4 text-xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${
+                            log.type === 'In' 
+                              ? 'bg-green-50 text-green-600 dark:bg-green-950/40 dark:text-green-400' 
+                              : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                          }`}>
+                            <Clock className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-800 dark:text-white">Punch {log.type === 'In' ? 'Check-In' : 'Check-Out'}</p>
+                            <p className="text-[10px] text-slate-450 mt-0.5" title={`${log.method} • GPS: ${log.lat}, ${log.lng}`}>
+                              {log.method} • {log.lat}, {log.lng}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-bold text-slate-800 dark:text-white">Punch {log.type === 'In' ? 'Check-In' : 'Check-Out'}</p>
-                          <p className="text-[10px] text-slate-450 mt-0.5" title={`${log.method} • GPS: ${log.lat}, ${log.lng}`}>
-                            {log.method} • {log.lat}, {log.lng}
-                          </p>
-                        </div>
+                        <span className={`font-bold text-xs shrink-0 ${formattedPunchTime.startsWith('Today') ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}`}>{formattedPunchTime}</span>
                       </div>
-                      <span className={`font-bold text-xs shrink-0 ${log.time.startsWith('Today') ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}`}>{log.time}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1863,13 +1921,12 @@ export const Attendance: React.FC = () => {
                       };
 
                       const getShiftStyle = (val: string) => {
-                        switch (val) {
-                          case 'Morning': return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800/60';
-                          case 'Evening': return 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800/60';
-                          case 'Night': return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60';
-                          case 'Week Off': return 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700';
-                          default: return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800/60';
-                        }
+                        const norm = (val || '').trim().toUpperCase();
+                        if (norm === 'MORNING' || norm === 'M') return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800/60';
+                        if (norm === 'EVENING' || norm === 'E') return 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800/60';
+                        if (norm === 'NIGHT' || norm === 'N') return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60';
+                        if (norm === 'OFF' || norm === 'WEEK OFF' || norm === 'WO') return 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700';
+                        return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800/60';
                       };
 
                       return (
@@ -1889,7 +1946,15 @@ export const Attendance: React.FC = () => {
                           </td>
 
                           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => {
-                            const val = shiftsForEmp[day] || 'General';
+                            const rawVal = shiftsForEmp[day] || 'General';
+                            const norm = (rawVal || '').trim().toUpperCase();
+                            const val = (norm === 'MORNING' || norm === 'M') ? 'Morning'
+                                      : (norm === 'EVENING' || norm === 'E') ? 'Evening'
+                                      : (norm === 'NIGHT' || norm === 'N') ? 'Night'
+                                      : (norm === 'OFF' || norm === 'WEEK OFF' || norm === 'WO') ? 'Week Off'
+                                      : (norm === 'GENERAL' || norm === 'G') ? 'General'
+                                      : rawVal;
+
                             return (
                               <td key={day} className="p-2 text-center">
                                 <select
@@ -1903,7 +1968,7 @@ export const Attendance: React.FC = () => {
                                   <option value="Night" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Night</option>
                                   <option value="Week Off" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Week Off</option>
                                   {shiftTimingsList.map(st => (
-                                    <option key={st.id || st.code} value={st.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                    <option key={st.id || st.code} value={st.code || st.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
                                       {st.name}
                                     </option>
                                   ))}

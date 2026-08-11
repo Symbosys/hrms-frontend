@@ -29,7 +29,7 @@ import {
 import { useApp } from '../context/AppContext';
 
 export const Payroll: React.FC = () => {
-  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, showConfirm, showAlert } = useApp();
+  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, showConfirm, showAlert, companyName, setCompanyName } = useApp();
   const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin';
 
 
@@ -134,9 +134,9 @@ export const Payroll: React.FC = () => {
   const selectedEmployee = dbEmployees.find(e => e.id === selectedEmpId) || dbEmployees[0];
   const selectedRun = runs.find(r => r.employeeId === selectedEmpId);
 
-  const empBasic = selectedRun ? selectedRun.basic : (selectedEmployee?.basic || 15000);
+  const empBasic = selectedRun ? selectedRun.basic : (selectedEmployee?.basic || 50000);
   const empHra = selectedRun ? selectedRun.hra : (selectedEmployee?.hra || Math.round(empBasic * 0.4));
-  const empAllowance = selectedRun ? selectedRun.allowance : (selectedEmployee?.allowance || Math.round(empBasic * 0.2));
+  const empAllowance = selectedRun ? selectedRun.allowance : (selectedEmployee?.allowance || Math.round(empBasic * 0.3));
   const empPf = selectedRun ? selectedRun.pf : Math.min(1800, Math.round(empBasic * 0.12));
   const empPt = selectedRun ? selectedRun.pt : 200;
   const empTds = selectedRun ? selectedRun.tds : (empBasic > 30000 ? Math.round(empBasic * 0.05) : 0);
@@ -745,22 +745,35 @@ export const Payroll: React.FC = () => {
           
           {/* Controls */}
           <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="text-slate-400 font-bold uppercase">Template Layout:</span>
-              <div className="flex flex-wrap gap-1">
-                {(['classic', 'modern', 'minimalist', 'grid', 'fluid'] as const).map((style) => (
-                  <button
-                    key={style}
-                    onClick={() => setPayslipStyle(style)}
-                    className={`px-3 py-1 rounded-lg font-bold transition-all ${
-                      payslipStyle === style 
-                        ? 'bg-primary text-white' 
-                        : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {style.toUpperCase()} Style
-                  </button>
-                ))}
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 font-bold uppercase">Company Name:</span>
+                <input 
+                  type="text" 
+                  value={companyName} 
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="Company Name"
+                  className="px-3 py-1 border rounded-lg bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-bold text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 font-bold uppercase">Template Layout:</span>
+                <div className="flex flex-wrap gap-1">
+                  {(['classic', 'modern', 'minimalist', 'grid', 'fluid'] as const).map((style) => (
+                    <button
+                      key={style}
+                      onClick={() => setPayslipStyle(style)}
+                      className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                        payslipStyle === style 
+                          ? 'bg-primary text-white' 
+                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {style.toUpperCase()} Style
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -775,7 +788,7 @@ export const Payroll: React.FC = () => {
                 ))}
               </select>
               <button 
-                onClick={() => alert("Downloading Payslip PDF...")}
+                onClick={() => alert(`Downloading Payslip PDF for ${selectedEmployee?.name || 'Employee'} (${companyName})...`)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg font-bold hover:scale-105 transition-all"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -793,7 +806,7 @@ export const Payroll: React.FC = () => {
                 {payslipStyle === 'classic' && (
                   <div className="border border-slate-350 p-6 space-y-6 text-slate-800 dark:text-slate-100 font-serif">
                     <div className="text-center">
-                      <h2 className="text-lg font-bold uppercase">FactoCorp Technologies Pvt Ltd</h2>
+                      <h2 className="text-lg font-bold uppercase">{companyName}</h2>
                       <p className="text-[10px] italic">12th Floor, Trade Center, BKC, Mumbai - 400051</p>
                       <p className="font-bold border-y py-1.5 mt-3 uppercase text-xs">Salary Statement for {reportMonth} {reportYear}</p>
                     </div>
@@ -850,7 +863,7 @@ export const Payroll: React.FC = () => {
                         <Landmark className="h-6 w-6" />
                       </div>
                       <div>
-                        <h2 className="text-md font-extrabold text-primary">FactoCorp HRMS</h2>
+                        <h2 className="text-md font-extrabold text-primary">{companyName}</h2>
                         <p className="text-[10px] text-slate-400 font-semibold">{reportMonth} {reportYear} Remittance Statement</p>
                       </div>
                     </div>
@@ -897,7 +910,7 @@ export const Payroll: React.FC = () => {
                 {(payslipStyle === 'minimalist' || payslipStyle === 'grid' || payslipStyle === 'fluid') && (
                   <div className="p-6 border rounded-xl space-y-4 text-xs font-mono">
                     <div className="flex justify-between font-bold border-b pb-2">
-                      <span>FactoCorp Inc.</span>
+                      <span>{companyName}</span>
                       <span>Payslip {reportMonth} {reportYear}</span>
                     </div>
                     <div className="space-y-1">

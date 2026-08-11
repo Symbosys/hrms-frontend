@@ -88,6 +88,8 @@ interface AppContextType {
   setCurrentUser: (emp: Employee | null) => void;
   organizationId: string | null;
   setOrganizationId: (id: string | null) => void;
+  companyName: string;
+  setCompanyName: (name: string) => void;
   logout: () => void;
 }
 
@@ -125,6 +127,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return null;
     }
   });
+  const [companyName, setCompanyNameState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('companyName') || 'Symbosys Technologies Pvt Ltd';
+    } catch {
+      return 'Symbosys Technologies Pvt Ltd';
+    }
+  });
+
+  const setCompanyName = (name: string) => {
+    setCompanyNameState(name);
+    try {
+      localStorage.setItem('companyName', name);
+    } catch {}
+  };
 
   useEffect(() => {
     localStorage.setItem('isAuthenticated', String(isAuthenticated));
@@ -347,6 +363,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsAuthenticated,
       currentUser,
       setCurrentUser,
+      companyName,
+      setCompanyName,
       logout
     }}>
       {children}

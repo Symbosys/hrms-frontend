@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   AlertTriangle,
   Download,
+  Eye,
   FileText,
   Folder,
   Upload,
@@ -19,6 +20,9 @@ import {
 
 export const Documents: React.FC = () => {
   const { activeSubModule, setActiveSubModule, addAuditLog, showConfirm, showAlert } = useApp();
+
+  // Active document preview modal state
+  const [viewingDoc, setViewingDoc] = useState<VaultDoc | null>(null);
 
   // Simulated active employee switcher
   const [selectedEmpId, setSelectedEmpId] = useState('');
@@ -285,6 +289,14 @@ export const Documents: React.FC = () => {
                         
                         <div className="flex items-center gap-1.5">
                           <button 
+                            onClick={() => setViewingDoc(d)}
+                            className="p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-lg hover:scale-105 transition-all text-slate-500 hover:text-primary"
+                            title="View / Preview Document"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+
+                          <button 
                             onClick={() => showAlert(`Downloading "${d.name}" file locker decryption stream...`, "File Download Started", "info")}
                             className="p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-lg hover:scale-105 transition-all"
                             title="Download Document"
@@ -430,6 +442,71 @@ export const Documents: React.FC = () => {
               {uploadDocMut.isPending ? "Uploading..." : "Upload Secure File"}
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Document Viewer Modal */}
+      {viewingDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-primary/10 text-primary rounded-xl">
+                  <FileText className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-white text-base">{viewingDoc.name}</h3>
+                  <p className="text-xs text-slate-400">Category: {viewingDoc.category} Vault • Uploaded: {viewingDoc.uploadedOn}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setViewingDoc(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Document Preview View Box */}
+            <div className="p-8 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/80 dark:border-slate-800/80 flex flex-col items-center justify-center text-center space-y-4 min-h-[220px]">
+              <FileText className="h-16 w-16 text-primary/80" />
+              <div>
+                <p className="font-bold text-slate-800 dark:text-slate-200 text-sm">{viewingDoc.name}</p>
+                <p className="text-xs text-slate-400 mt-1">Encrypted Vault Locker Document Preview</p>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-md font-medium">
+                  Category: {viewingDoc.category}
+                </span>
+                <span className={`px-2.5 py-1 rounded-md font-bold uppercase text-[10px] ${
+                  viewingDoc.status === 'Active' ? 'bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300' :
+                  viewingDoc.status === 'Expiring Soon' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' :
+                  'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
+                }`}>
+                  {viewingDoc.status}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setViewingDoc(null)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-semibold text-xs hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
+              >
+                Close Viewer
+              </button>
+              <button
+                onClick={() => {
+                  showAlert(`Downloading "${viewingDoc.name}" file locker decryption stream...`, "File Download Started", "info");
+                  setViewingDoc(null);
+                }}
+                className="px-4 py-2 bg-primary text-white rounded-xl font-bold text-xs hover:scale-105 transition-all flex items-center gap-2 shadow-md shadow-primary/10"
+              >
+                <Download className="h-4 w-4" />
+                Download File
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -40,7 +40,6 @@ export interface RegularizationRequest {
 export const usePunches = (employeeId: string) => {
   return useQuery<BaseResponse<PunchLog[]>, Error>({
     queryKey: ['attendancePunches', employeeId],
-    refetchInterval: 3000,
     queryFn: async () => {
       const response = await apiClient.get<BaseResponse<PunchLog[]>>(`/attendance/punches/${employeeId}`);
       return response.data;
@@ -265,8 +264,8 @@ export const useSaveRosters = () => {
         data: payload,
       };
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['shiftRosters', variables.week] });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shiftRosters'] });
     },
   });
 };

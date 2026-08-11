@@ -29,8 +29,8 @@ import {
   Tooltip,
   XAxis, YAxis
 } from 'recharts';
-import { useApp } from '../context/AppContext';
 import { useDashboardData } from '../api/hook/useDashboard';
+import { useApp } from '../context/AppContext';
 
 export const Dashboard: React.FC = () => {
   const { 

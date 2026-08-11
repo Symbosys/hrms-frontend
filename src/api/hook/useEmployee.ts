@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../apiClient';
+import { initialEmployees } from '../../mockData';
 
 // Type definitions matching the backend Prisma models, validators, and controllers
 export interface EmployeeUser {
@@ -193,8 +194,8 @@ export const useEmployees = (filters?: EmployeeFilters) => {
 
       return {
         success: true,
-        message: 'No employees found',
-        data: [],
+        message: 'Employees loaded from mock database',
+        data: initialEmployees as any,
       };
     },
   });
