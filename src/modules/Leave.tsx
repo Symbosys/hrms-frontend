@@ -359,6 +359,7 @@ export const Leave: React.FC = () => {
       addAuditLog("Allocated Leave", "Leave Management", `Allocated ${allocateDays} days of ${leaveTypes.find(t => t.id === allocateTypeId)?.name} for ${activeUser.name}`);
       showAlert("Leave allocation updated successfully!", "Allocation Updated", "success");
       setShowAllocateForm(false);
+      
     } catch (err: any) {
       showAlert(err.response?.data?.message || err.message || "Failed to allocate leaves.", "Error", "danger");
     }
