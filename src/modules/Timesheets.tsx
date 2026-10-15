@@ -48,6 +48,7 @@ export const Timesheets: React.FC = () => {
   const employeesList = dbEmployeesRes?.data || [];
 
   // Automatically select first employee as current user
+  
   useEffect(() => {
     if (employeesList.length > 0 && !selectedEmpId) {
       setSelectedEmpId(employeesList[0].id);
