@@ -531,3 +531,49 @@ export const useSaveEmployeeExit = () => {
     },
   });
 };
+
+export interface ResetEmployeeCredentialsInput {
+  newEmail?: string | null;
+  newPassword?: string | null;
+  email?: string | null;
+  password?: string | null;
+}
+
+export interface ResetEmployeeCredentialsResponse {
+  employeeId: string;
+  employeeName: string;
+  email: string;
+  temporaryPassword: string;
+  updatedAt: string;
+}
+
+/**
+ * Hook to reset employee login credentials (email & password)
+ * POST /api/v1/employees/:id/reset-credentials
+ */
+export const useResetEmployeeCredentials = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    BaseResponse<ResetEmployeeCredentialsResponse>,
+    Error,
+    {
+      employeeId: string;
+      data: ResetEmployeeCredentialsInput;
+    }
+  >({
+    mutationFn: async ({ employeeId, data }) => {
+      const response = await apiClient.post<BaseResponse<ResetEmployeeCredentialsResponse>>(
+        `/employees/${employeeId}/reset-credentials`,
+        data
+      );
+      return response.data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['employee', variables.employeeId] });
+      queryClient.invalidateQueries({ queryKey: ['employee', variables.employeeId, 'credentials'] });
+    },
+  });
+};
+

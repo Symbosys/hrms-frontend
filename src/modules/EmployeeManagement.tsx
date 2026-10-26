@@ -28,7 +28,15 @@ import {
   User,
   Users,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Key,
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
+  Lock,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/apiClient';
@@ -49,6 +57,7 @@ import {
   useEmployeePersonal,
   useEmployees,
   useEmployeeSalary,
+  useResetEmployeeCredentials,
   useSaveEmployeeExit,
   useUpdateEmployeePersonal,
   useUpdateEmployeeSalary
@@ -852,6 +861,75 @@ export const EmployeeManagement: React.FC = () => {
   const deleteEmployeeMutation = useDeleteEmployee();
   const updateSalaryMutation = useUpdateEmployeeSalary();
   const updatePersonalMutation = useUpdateEmployeePersonal();
+  const resetCredentialsMutation = useResetEmployeeCredentials();
+
+  // Reset Employee Login Credentials Modal State
+  const [showResetCredModal, setShowResetCredModal] = useState(false);
+  const [targetEmployeeForReset, setTargetEmployeeForReset] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [resetNewEmail, setResetNewEmail] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetCredResult, setResetCredResult] = useState<{ email: string; temporaryPassword: string; employeeName: string } | null>(null);
+  const [copiedCred, setCopiedCred] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const handleOpenResetCredModal = (emp: { id: string; name: string; email: string }) => {
+    setTargetEmployeeForReset(emp);
+    setResetNewEmail(emp.email || '');
+    setResetNewPassword('');
+    setShowResetPassword(false);
+    setResetCredResult(null);
+    setCopiedCred(false);
+    setResetError(null);
+    setShowResetCredModal(true);
+  };
+
+  const handleGenerateStrongPassword = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    let pass = "Emp@";
+    for (let i = 0; i < 6; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    pass += "!26";
+    setResetNewPassword(pass);
+    setShowResetPassword(true);
+  };
+
+  const handleExecuteResetCredentials = () => {
+    if (!targetEmployeeForReset) return;
+    setResetError(null);
+    resetCredentialsMutation.mutate(
+      {
+        employeeId: targetEmployeeForReset.id,
+        data: {
+          newEmail: resetNewEmail.trim() || undefined,
+          newPassword: resetNewPassword.trim() || undefined,
+        },
+      },
+      {
+        onSuccess: (res) => {
+          if (res?.data) {
+            setResetCredResult({
+              email: res.data.email,
+              temporaryPassword: res.data.temporaryPassword,
+              employeeName: res.data.employeeName,
+            });
+          }
+        },
+        onError: (err: any) => {
+          setResetError(err.response?.data?.message || err.message || "Failed to reset credentials");
+        },
+      }
+    );
+  };
+
+  const handleCopyCredentials = () => {
+    if (!resetCredResult) return;
+    const text = `Employee Login Credentials:\nName: ${resetCredResult.employeeName}\nLogin Email: ${resetCredResult.email}\nTemporary Password: ${resetCredResult.temporaryPassword}`;
+    navigator.clipboard.writeText(text);
+    setCopiedCred(true);
+    setTimeout(() => setCopiedCred(false), 2500);
+  };
 
   // Dynamic Role & Department Override State with LocalStorage Persistence
   const [empOverridesMap, setEmpOverridesMap] = useState<Record<string, { role?: string; department?: string; basic?: number; netSalary?: number; status?: Employee['status']; clearanceStatus?: Employee['clearanceStatus'] }>>(() => {
@@ -1974,7 +2052,6 @@ export const EmployeeManagement: React.FC = () => {
                   </div>
                   
                   <div className="border-t border-slate-100 dark:border-slate-800 pt-3.5 mt-4 flex items-center justify-between text-xs">
-                    <span className="text-slate-400">Status:</span>
                     <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${
                       emp.status === 'Active' ? 'bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300' :
                       emp.status === 'On Leave' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' :
@@ -1983,6 +2060,17 @@ export const EmployeeManagement: React.FC = () => {
                     }`}>
                       {emp.status}
                     </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenResetCredModal({ id: emp.id, name: emp.name, email: emp.email });
+                      }}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 px-2 py-0.5 rounded-lg transition-colors"
+                      title="Reset Login Credentials"
+                    >
+                      <Key className="h-3 w-3" />
+                      Reset Login
+                    </button>
                   </div>
                 </div>
               ))}
@@ -2034,7 +2122,20 @@ export const EmployeeManagement: React.FC = () => {
                         </span>
                       </td>
                       <td className="p-4 text-right">
-                        <ChevronRight className="h-4 w-4 text-slate-400 inline" />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenResetCredModal({ id: emp.id, name: emp.name, email: emp.email });
+                            }}
+                            className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 px-2.5 py-1 rounded-lg transition-colors"
+                            title="Reset Login Credentials"
+                          >
+                            <Key className="h-3 w-3" />
+                            Reset Login
+                          </button>
+                          <ChevronRight className="h-4 w-4 text-slate-400 inline" />
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2098,6 +2199,14 @@ export const EmployeeManagement: React.FC = () => {
                   className="px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-semibold hover:scale-105 transition-all shadow-md shadow-primary/10"
                 >
                   Promote / Transfer
+                </button>
+                <button 
+                  onClick={() => handleOpenResetCredModal({ id: activeEmployee.id, name: activeEmployee.name, email: activeEmployee.email })}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold hover:scale-105 transition-all shadow-md shadow-emerald-600/10"
+                  title="Reset Employee Login Credentials"
+                >
+                  <Key className="h-3.5 w-3.5" />
+                  Reset Login
                 </button>
               </div>
 
@@ -5507,6 +5616,178 @@ export const EmployeeManagement: React.FC = () => {
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* RESET EMPLOYEE CREDENTIALS MODAL                        */}
+      {/* ======================================================== */}
+      {showResetCredModal && targetEmployeeForReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-left">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <Key className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-white text-base">Reset Employee Login</h3>
+                  <p className="text-[11px] text-slate-400">Set email or password for employee portal login</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowResetCredModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Target Employee Summary */}
+            <div className="my-4 p-3 bg-slate-50 dark:bg-slate-850/60 border border-slate-100 dark:border-slate-800 rounded-xl flex items-center justify-between text-xs">
+              <div>
+                <p className="text-[10px] text-slate-400 uppercase font-bold">Employee</p>
+                <p className="font-bold text-slate-800 dark:text-white mt-0.5">{targetEmployeeForReset.name}</p>
+              </div>
+              <span className="font-mono text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-md">
+                {targetEmployeeForReset.id}
+              </span>
+            </div>
+
+            {/* Success State */}
+            {resetCredResult ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl">
+                  <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-xs mb-2">
+                    <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    Credentials Updated Successfully!
+                  </div>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400/90 mb-3">
+                    Share these new login credentials with {resetCredResult.employeeName}. They can now log into the Employee HRMS Portal.
+                  </p>
+                  <div className="space-y-2 bg-white dark:bg-slate-900 p-3 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">Login Email</span>
+                      <span className="font-mono font-semibold text-slate-800 dark:text-white select-all">{resetCredResult.email}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block">New Password</span>
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 select-all">{resetCredResult.temporaryPassword}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    onClick={handleCopyCredentials}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs transition-colors"
+                  >
+                    {copiedCred ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                    {copiedCred ? "Copied to Clipboard!" : "Copy Credentials"}
+                  </button>
+                  <button
+                    onClick={() => setShowResetCredModal(false)}
+                    className="px-5 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold text-xs transition-colors shadow-sm"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Input Form */
+              <div className="space-y-4">
+                {resetError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl text-red-600 dark:text-red-300 text-xs">
+                    {resetError}
+                  </div>
+                )}
+
+                {/* Login Email Field */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                    Login Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="email"
+                      value={resetNewEmail}
+                      onChange={(e) => setResetNewEmail(e.target.value)}
+                      placeholder="employee@company.com"
+                      className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                      New Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleGenerateStrongPassword}
+                      className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Generate Strong
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showResetPassword ? "text" : "password"}
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      placeholder="Leave blank to auto-generate"
+                      className="w-full pl-9 pr-9 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(!showResetPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Tip: If password field is left empty, a secure password will be generated automatically.
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowResetCredModal(false)}
+                    className="w-1/3 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-xs hover:bg-slate-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExecuteResetCredentials}
+                    disabled={resetCredentialsMutation.isPending}
+                    className="w-2/3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition-colors shadow-md shadow-emerald-600/20 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {resetCredentialsMutation.isPending ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      <>
+                        <Key className="h-3.5 w-3.5" />
+                        Save & Reset Credentials
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
