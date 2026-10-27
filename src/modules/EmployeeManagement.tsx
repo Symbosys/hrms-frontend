@@ -59,6 +59,7 @@ import {
   useEmployeeSalary,
   useResetEmployeeCredentials,
   useSaveEmployeeExit,
+  useUpdateEmployee,
   useUpdateEmployeePersonal,
   useUpdateEmployeeSalary
 } from '../api/hook/useEmployee';
@@ -891,6 +892,7 @@ export const EmployeeManagement: React.FC = () => {
   const { data: employeesResponse, isLoading: employeesLoading } = useEmployees();
   const createEmployeeMutation = useCreateEmployee();
   const deleteEmployeeMutation = useDeleteEmployee();
+  const updateEmployeeMutation = useUpdateEmployee();
   const updateSalaryMutation = useUpdateEmployeeSalary();
   const updatePersonalMutation = useUpdateEmployeePersonal();
   const resetCredentialsMutation = useResetEmployeeCredentials();
@@ -1044,8 +1046,9 @@ export const EmployeeManagement: React.FC = () => {
               emp.status === 'RESIGNED' ? 'Resigned' : 'Terminated'),
       joiningDate: emp.joiningDate ? new Date(emp.joiningDate).toISOString().split('T')[0] : '',
       location: emp.location || '',
-      role: (emp as any).user?.role?.name || emp.role || override?.role || emp.designation || '',
-      department: override?.department || (typeof emp.department === 'string' ? emp.department : (emp.department?.name || '')),
+      role: override?.role || emp.designation || emp.role || (emp as any).user?.role?.name || '',
+      department: (typeof emp.department === 'string' ? emp.department : (emp.department?.name || dbDepartments.find(d => d.id === emp.departmentId)?.name)) || override?.department || '',
+      departmentId: emp.departmentId || (dbDepartments.find(d => d.name === (override?.department || (typeof emp.department === 'string' ? emp.department : emp.department?.name)))?.id) || null,
       manager: emp.manager?.name || '',
       basic: override?.basic ?? emp.basic ?? 0,
       hra: emp.hra ?? 0,
@@ -1092,6 +1095,8 @@ export const EmployeeManagement: React.FC = () => {
   const [isDraggingOrgChart, setIsDraggingOrgChart] = useState<boolean>(false);
   const [dragStartOrgChart, setDragStartOrgChart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [selectedOrgDeptFilter, setSelectedOrgDeptFilter] = useState<string>('All');
+  void selectedOrgDeptFilter;
+  void setSelectedOrgDeptFilter;
 
   const { data: salaryResponse } = useEmployeeSalary(activeEmployee?.id);
   const { data: personalResponse } = useEmployeePersonal(activeEmployee?.id);
@@ -1103,7 +1108,8 @@ export const EmployeeManagement: React.FC = () => {
   const addFamilyMutation = useAddEmployeeFamily();
   const deleteFamilyMutation = useDeleteEmployeeFamily();
   const saveExitMutation = useSaveEmployeeExit();
-  const { data: exitResponse } = useEmployeeExit(selectedExitEmpId || activeEmployee?.id);
+  const { data: _exitResponse } = useEmployeeExit(selectedExitEmpId || activeEmployee?.id);
+  void _exitResponse;
   const { data: leaveAllocResponse } = useLeaveAllocations({ employeeId: activeEmployee?.id });
 
   const salaryDetails = salaryResponse?.data || activeEmployee;
@@ -1264,7 +1270,6 @@ export const EmployeeManagement: React.FC = () => {
 
   // Promote / Transfer Modal State
   const [showPromoteModal, setShowPromoteModal] = useState(false);
-  const [promoType, setPromoType] = useState<'promotion' | 'transfer' | 'both'>('promotion');
   const [promoNewRole, setPromoNewRole] = useState('');
   const [promoNewDept, setPromoNewDept] = useState('');
   const [promoEffectiveDate, setPromoEffectiveDate] = useState('');
@@ -1273,9 +1278,8 @@ export const EmployeeManagement: React.FC = () => {
 
   const handleOpenPromoteModal = () => {
     if (!activeEmployee) return;
-    setPromoType('promotion');
     setPromoNewRole(activeEmployee.role || '');
-    setPromoNewDept(activeEmployee.department || 'Engineering');
+    setPromoNewDept(activeEmployee.department || (departmentOptions[0] || ''));
     setPromoEffectiveDate(new Date().toISOString().split('T')[0]);
     setPromoNewBasic(activeEmployee.basic ? activeEmployee.basic.toString() : '45000');
     setPromoReason('');
@@ -1291,7 +1295,7 @@ export const EmployeeManagement: React.FC = () => {
     const newRole = promoNewRole || oldRole;
     const newDept = promoNewDept || oldDept;
 
-    if (promoType === 'promotion' || promoType === 'both') {
+    if (newRole && newRole !== oldRole) {
       activeEmployee.promotions = [
         {
           date: promoEffectiveDate,
@@ -1304,7 +1308,7 @@ export const EmployeeManagement: React.FC = () => {
       activeEmployee.role = newRole;
     }
 
-    if (promoType === 'transfer' || promoType === 'both') {
+    if (newDept && newDept !== oldDept) {
       activeEmployee.transfers = [
         {
           date: promoEffectiveDate,
@@ -1320,6 +1324,10 @@ export const EmployeeManagement: React.FC = () => {
     const updatedBasic = promoNewBasic ? Number(promoNewBasic) : activeEmployee.basic;
     const updatedNet = promoNewBasic ? Number(promoNewBasic) * 1.35 : activeEmployee.netSalary;
 
+    const matchedDept = dbDepartments.find(
+      d => d.name.toLowerCase() === newDept.toLowerCase() || d.id === newDept || d.code.toLowerCase() === newDept.toLowerCase()
+    );
+
     setEmpOverridesMap(prev => ({
       ...prev,
       [activeEmployee.id]: { role: newRole, department: newDept, basic: updatedBasic, netSalary: updatedNet },
@@ -1327,17 +1335,40 @@ export const EmployeeManagement: React.FC = () => {
       [activeEmployee.name]: { role: newRole, department: newDept, basic: updatedBasic, netSalary: updatedNet }
     }));
 
-    if (updatePersonalMutation && updatePersonalMutation.mutate) {
-      updatePersonalMutation.mutate({
+    if (setEmployees) {
+      setEmployees(prev => prev.map(emp => emp.id === activeEmployee.id ? {
+        ...emp,
+        role: newRole,
+        designation: newRole,
+        department: newDept,
+        departmentId: matchedDept ? matchedDept.id : emp.departmentId,
+        basic: updatedBasic,
+        netSalary: updatedNet,
+        promotions: activeEmployee.promotions,
+        transfers: activeEmployee.transfers
+      } : emp));
+    }
+
+    if (updateEmployeeMutation && updateEmployeeMutation.mutate) {
+      updateEmployeeMutation.mutate({
         id: activeEmployee.id,
-        data: { designation: newRole } as any
-      }, { onError: () => {} });
+        data: {
+          designation: newRole,
+          role: newRole,
+          departmentId: matchedDept ? matchedDept.id : undefined,
+          department: newDept,
+          basic: updatedBasic,
+          netSalary: updatedNet
+        }
+      }, {
+        onError: (err) => console.error("Error updating employee promotion/transfer:", err)
+      });
     }
 
     if (updateSalaryMutation && updateSalaryMutation.mutate) {
       updateSalaryMutation.mutate({
         id: activeEmployee.id,
-        data: { basic: updatedBasic }
+        data: { basic: updatedBasic, netSalary: updatedNet }
       }, { onError: () => {} });
     }
 
@@ -1609,6 +1640,19 @@ export const EmployeeManagement: React.FC = () => {
   };
 
   const handleCreateEmployee = () => {
+    if (!newEmp.role || !newEmp.role.trim()) {
+      alert("Job Designation Role (Title) is required. Please enter a job title (e.g. Senior Frontend Developer).");
+      return;
+    }
+    if (!newEmp.roleId) {
+      alert("Organization Role (Permissions) is required. Please select a role from the dropdown.");
+      return;
+    }
+
+    const matchedDept = dbDepartments.find(
+      d => d.name === newEmp.department || d.id === newEmp.department || (d.code && d.code === newEmp.department)
+    );
+
     const finalEmp = {
       employeeId: newEmp.id!,
       name: newEmp.name!,
@@ -1623,6 +1667,8 @@ export const EmployeeManagement: React.FC = () => {
       location: newEmp.location || null,
       designation: newEmp.role || null,
       roleId: newEmp.roleId || null,
+      department: newEmp.department || null,
+      departmentId: matchedDept?.id || null,
       basic: newEmp.basic || null,
       hra: newEmp.hra || null,
       allowance: newEmp.allowance || null,
@@ -5422,46 +5468,6 @@ export const EmployeeManagement: React.FC = () => {
                   <span className="text-[10px] text-slate-400 block font-medium">Current Department</span>
                   <span className="font-bold text-slate-700 dark:text-slate-200 text-xs">{activeEmployee.department}</span>
                 </div>
-              </div>
-            </div>
-
-            {/* Workflow Action Type Selector */}
-            <div className="space-y-1.5">
-              <label className="text-slate-500 font-semibold text-[11px]">Workflow Action Type</label>
-              <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 dark:bg-slate-950 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setPromoType('promotion')}
-                  className={`py-1.5 rounded-lg font-semibold transition-all ${
-                    promoType === 'promotion'
-                      ? 'bg-white dark:bg-slate-800 text-primary shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  Role Upgrade
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPromoType('transfer')}
-                  className={`py-1.5 rounded-lg font-semibold transition-all ${
-                    promoType === 'transfer'
-                      ? 'bg-white dark:bg-slate-800 text-primary shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  Dept Transfer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPromoType('both')}
-                  className={`py-1.5 rounded-lg font-semibold transition-all ${
-                    promoType === 'both'
-                      ? 'bg-white dark:bg-slate-800 text-primary shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  Role + Transfer
-                </button>
               </div>
             </div>
 

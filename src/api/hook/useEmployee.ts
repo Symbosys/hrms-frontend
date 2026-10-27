@@ -104,9 +104,11 @@ export interface CreateEmployeeRequest {
   location?: string | null;
   address?: string | null;
   designation?: string | null;
+  role?: string | null;
   userId?: string | null;
   roleId?: string | null;
   departmentId?: string | null;
+  department?: string | any | null;
   managerId?: string | null;
 
   // Salary Details (optional during initial creation)
@@ -181,7 +183,7 @@ export const useEmployees = (filters?: EmployeeFilters) => {
 
         const mappedList = list.map(emp => ({
           ...emp,
-          role: (emp as any).user?.role?.name || emp.role || emp.designation || 'Employee',
+          role: emp.designation || emp.role || (emp as any).user?.role?.name || 'Employee',
         }));
 
         return {
