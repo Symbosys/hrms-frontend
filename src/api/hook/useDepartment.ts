@@ -31,7 +31,7 @@ export interface BaseResponse<T> {
 
 export interface CreateDepartmentRequest {
   name: string;
-  code: string;
+  code?: string;
   description?: string;
   managerId?: string | null;
   parentId?: string | null;
@@ -49,11 +49,13 @@ export interface UpdateDepartmentRequest {
  * Hook to retrieve all departments
  * GET /api/v1/departments
  */
-export const useDepartments = () => {
+export const useDepartments = (organizationId?: string | null) => {
   return useQuery<BaseResponse<Department[]>, Error>({
-    queryKey: ['departments'],
+    queryKey: ['departments', organizationId || 'default'],
     queryFn: async () => {
-      const response = await apiClient.get<BaseResponse<Department[]>>('/departments');
+      const response = await apiClient.get<BaseResponse<Department[]>>('/departments', {
+        params: organizationId ? { organizationId } : undefined,
+      });
       return response.data;
     },
   });

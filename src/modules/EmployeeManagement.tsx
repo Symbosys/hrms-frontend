@@ -495,7 +495,8 @@ interface DepartmentManagementPanelProps {
 }
 
 const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ employees }) => {
-  const { data: deptsResponse, isLoading: deptsLoading } = useDepartments();
+  const { organizationId } = useApp();
+  const { data: deptsResponse, isLoading: deptsLoading } = useDepartments(organizationId);
 
   const createDeptMutation = useCreateDepartment();
   const updateDeptMutation = useUpdateDepartment();
@@ -505,6 +506,7 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
   const [newDeptName, setNewDeptName] = useState('');
   const [newDeptCode, setNewDeptCode] = useState('');
   const [newDeptDesc, setNewDeptDesc] = useState('');
+  const [isCodeManual, setIsCodeManual] = useState(false);
   const [newDeptManagerId, setNewDeptManagerId] = useState('');
   const [newDeptParentId, setNewDeptParentId] = useState('');
 
@@ -518,13 +520,24 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
   const departments = deptsResponse?.data || [];
   const activeDept = departments.find(d => d.id === selectedDeptId);
 
+  const generateDeptCode = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return '';
+    const words = trimmed.split(/\s+/);
+    if (words.length > 1) {
+      return words.map(w => w[0]).join('').toUpperCase().slice(0, 5);
+    }
+    return trimmed.slice(0, 3).toUpperCase();
+  };
+
   const handleCreateDepartment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDeptName || !newDeptCode) return;
+    if (!newDeptName) return;
+    const finalCode = (newDeptCode || generateDeptCode(newDeptName)).toUpperCase();
     createDeptMutation.mutate({
-      name: newDeptName,
-      code: newDeptCode.toUpperCase(),
-      description: newDeptDesc,
+      name: newDeptName.trim(),
+      code: finalCode,
+      description: newDeptDesc.trim() || undefined,
       managerId: newDeptManagerId || null,
       parentId: newDeptParentId || null
     }, {
@@ -532,12 +545,13 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
         setNewDeptName('');
         setNewDeptCode('');
         setNewDeptDesc('');
+        setIsCodeManual(false);
         setNewDeptManagerId('');
         setNewDeptParentId('');
         alert("Department created successfully!");
       },
       onError: (err: any) => {
-        const errorMsg = err.response?.data?.message || err.message || "Conflict: Department with this name or code already exists.";
+        const errorMsg = err.response?.data?.message || err.message || "Conflict: Department with this name or code already exists in this organization.";
         alert(errorMsg);
       }
     });
@@ -731,7 +745,13 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
                   <input 
                     type="text" 
                     value={newDeptName}
-                    onChange={(e) => setNewDeptName(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewDeptName(val);
+                      if (!isCodeManual) {
+                        setNewDeptCode(generateDeptCode(val));
+                      }
+                    }}
                     placeholder="e.g. Quality Assurance"
                     required
                     className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-300"
@@ -739,14 +759,20 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-slate-400 font-semibold">Department Code</label>
+                  <div className="flex justify-between items-center">
+                    <label className="text-slate-400 font-semibold">Department Code</label>
+                    <span className="text-[10px] text-primary font-medium">Auto-generated (Editable)</span>
+                  </div>
                   <input 
                     type="text" 
                     value={newDeptCode}
-                    onChange={(e) => setNewDeptCode(e.target.value)}
+                    onChange={(e) => {
+                      setNewDeptCode(e.target.value.toUpperCase());
+                      setIsCodeManual(true);
+                    }}
                     placeholder="e.g. QA"
                     required
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-300"
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-300 font-mono font-bold"
                   />
                 </div>
 
@@ -852,7 +878,7 @@ export const EmployeeManagement: React.FC = () => {
   const { data: rolesResponse } = useRoles(organizationId);
   const orgRoles = rolesResponse?.data || [];
 
-  const { data: deptsResponse } = useDepartments();
+  const { data: deptsResponse } = useDepartments(organizationId);
   const dbDepartments = deptsResponse?.data || [];
   const dbDeptNames = dbDepartments.map(d => d.name);
   
