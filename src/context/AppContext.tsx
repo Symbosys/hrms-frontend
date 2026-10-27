@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ConfirmModal, ModalOptions } from '../components/ConfirmModal';
 import {
   Asset,
@@ -96,6 +97,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const queryClient = useQueryClient();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
       return localStorage.getItem('isAuthenticated') === 'true';
@@ -324,6 +326,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = () => {
+    try {
+      queryClient.clear();
+    } catch {}
     setIsAuthenticated(false);
     setCurrentUser(null);
     setOrganizationIdState(null);

@@ -34,9 +34,11 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileOpen }) => {
-  const { activeModule, setActiveModule, activeSubModule, setActiveSubModule } = useApp();
+  const { activeModule, setActiveModule, activeSubModule, setActiveSubModule, userRole, currentUser } = useApp();
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin' || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'Super Admin';
 
   const menuItems: MenuItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -44,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
       id: 'employees', 
       label: 'Employee Center', 
       icon: Users,
-      subItems: [
+      subItems: isAdmin ? [
         { id: 'directory', label: 'Employee Directory' },
         { id: 'master', label: 'Employee Master' },
         { id: 'idcard', label: 'ID Card Generator' },
@@ -54,6 +56,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
         { id: 'bulk', label: 'Bulk Imports & Exports' },
         { id: 'roles', label: 'Role & Permissions' },
         { id: 'departments', label: 'Departments' }
+      ] : [
+        { id: 'directory', label: 'Employee Directory' },
+        { id: 'idcard', label: 'ID Card Generator' },
+        { id: 'orgchart', label: 'Organization Chart' },
       ]
     },
     { 

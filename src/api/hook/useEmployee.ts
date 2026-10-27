@@ -105,6 +105,7 @@ export interface CreateEmployeeRequest {
   address?: string | null;
   designation?: string | null;
   userId?: string | null;
+  roleId?: string | null;
   departmentId?: string | null;
   managerId?: string | null;
 

@@ -81,7 +81,8 @@ interface RoleManagementPanelProps {
 }
 
 const RoleManagementPanel: React.FC<RoleManagementPanelProps> = ({ employees }) => {
-  const { data: rolesResponse, isLoading: rolesLoading } = useRoles();
+  const { organizationId } = useApp();
+  const { data: rolesResponse, isLoading: rolesLoading } = useRoles(organizationId);
   const { data: permissionsResponse, isLoading: permissionsLoading } = usePermissions();
 
   const createRoleMutation = useCreateRole();
@@ -843,8 +844,13 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
 export const EmployeeManagement: React.FC = () => {
   const { 
     employees: contextEmployees, setEmployees, activeSubModule, setActiveSubModule, 
-    addAuditLog, selectedEmployeeId, setSelectedEmployeeId 
+    addAuditLog, selectedEmployeeId, setSelectedEmployeeId,
+    userRole, currentUser, organizationId
   } = useApp();
+
+  const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin' || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'Super Admin';
+  const { data: rolesResponse } = useRoles(organizationId);
+  const orgRoles = rolesResponse?.data || [];
 
   const { data: deptsResponse } = useDepartments();
   const dbDepartments = deptsResponse?.data || [];
@@ -991,7 +997,10 @@ export const EmployeeManagement: React.FC = () => {
   const [ratingTeamwork, setRatingTeamwork] = useState('4.5/5');
   const [ratingFeedback, setRatingFeedback] = useState('');
 
-  const dbEmployees = employeesResponse?.data || [];
+  const dbEmployees = (employeesResponse?.data || []).filter(emp => {
+    const roleName = ((emp as any).user?.role?.name || emp.role || '').toUpperCase();
+    return roleName !== 'SUPER_ADMIN' && roleName !== 'SUPER ADMIN';
+  });
 
   const employees = dbEmployees.map(emp => {
     const override = empOverridesMap[emp.id] || empOverridesMap[(emp as any).employeeId] || empOverridesMap[emp.name];
@@ -1397,9 +1406,10 @@ export const EmployeeManagement: React.FC = () => {
     fatherName?: string;
     permanentAddress?: string;
     languagesSpoken?: string;
+    roleId?: string;
   }>({
     id: `EMP${String(Date.now()).slice(-3)}${Math.floor(10 + Math.random() * 90)}`,
-    name: '', email: '', password: '', role: '', department: 'Engineering', status: 'Probation',
+    name: '', email: '', password: '', role: '', roleId: '', department: 'Engineering', status: 'Probation',
     joiningDate: new Date().toISOString().split('T')[0], location: 'Mumbai',
     manager: 'Neha Patel', basic: 30000, hra: 12000, allowance: 8000, deductions: 2000, netSalary: 38000,
     bankName: '', bankAccount: '', ifsc: '', pan: '', aadhaar: '', uan: '', pfNumber: '',
@@ -1466,14 +1476,28 @@ export const EmployeeManagement: React.FC = () => {
   const [selectedBulkEmpIds, setSelectedBulkEmpIds] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
 
-  // Active employees for standard directory (EXCLUDE Resigned & Terminated)
-  const activeEmployees = employees.filter(emp => emp.status !== 'Resigned' && emp.status !== 'Terminated');
+  // Active employees for standard directory (EXCLUDE Resigned, Terminated & Super Admin accounts)
+  const activeEmployees = employees.filter(emp => 
+    emp.status !== 'Resigned' && 
+    emp.status !== 'Terminated' &&
+    emp.role.toUpperCase() !== 'SUPER_ADMIN' &&
+    emp.role.toUpperCase() !== 'SUPER ADMIN'
+  );
   
   // Resigned employees for dedicated Resignation archive
   const resignedEmployees = employees.filter(emp => emp.status === 'Resigned' || emp.status === 'Terminated');
 
   // Directory filter uses activeEmployees so resigned employees never show in active directory
   const filteredEmployees = activeEmployees.filter(emp => {
+    // If not admin, restrict directory to only view self profile
+    if (!isAdmin) {
+      const isSelf = (emp.userId && currentUser?.id && emp.userId === currentUser.id) ||
+                     (emp.email && currentUser?.email && emp.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                     (emp.id && currentUser?.id && emp.id === currentUser.id) ||
+                     (emp.name && currentUser?.name && emp.name.toLowerCase() === currentUser.name.toLowerCase());
+      if (!isSelf) return false;
+    }
+
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           emp.role.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           emp.id.toLowerCase().includes(searchTerm.toLowerCase());
@@ -1572,6 +1596,7 @@ export const EmployeeManagement: React.FC = () => {
       joiningDate: newEmp.joiningDate || new Date().toISOString().split('T')[0],
       location: newEmp.location || null,
       designation: newEmp.role || null,
+      roleId: newEmp.roleId || null,
       basic: newEmp.basic || null,
       hra: newEmp.hra || null,
       allowance: newEmp.allowance || null,
@@ -1861,16 +1886,18 @@ export const EmployeeManagement: React.FC = () => {
         >
           Employee Directory
         </button>
-        <button 
-          onClick={() => setActiveSubModule('master')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'master' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Employee Onboarding Master
-        </button>
+        {isAdmin && (
+          <button 
+            onClick={() => setActiveSubModule('master')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'master' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Employee Onboarding Master
+          </button>
+        )}
         <button 
           onClick={() => setActiveSubModule('idcard')}
           className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
@@ -1894,61 +1921,65 @@ export const EmployeeManagement: React.FC = () => {
         >
           Organization Chart
         </button>
-        <button 
-          onClick={() => setActiveSubModule('exit')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'exit' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Exit Management & F&F
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('resignation')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
-            activeSubModule === 'resignation' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          <span>Resignation Archive</span>
-          {resignedEmployees.length > 0 && (
-            <span className="text-[10px] bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-bold px-1.5 py-0.5 rounded-full">
-              {resignedEmployees.length}
-            </span>
-          )}
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('bulk')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'bulk' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Bulk Actions & Mailing
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('roles')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'roles' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Role & Permissions
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('departments')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'departments' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Departments
-        </button>
+        {isAdmin && (
+          <>
+            <button 
+              onClick={() => setActiveSubModule('exit')}
+              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+                activeSubModule === 'exit' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Exit Management & F&F
+            </button>
+            <button 
+              onClick={() => setActiveSubModule('resignation')}
+              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+                activeSubModule === 'resignation' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <span>Resignation Archive</span>
+              {resignedEmployees.length > 0 && (
+                <span className="text-[10px] bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-bold px-1.5 py-0.5 rounded-full">
+                  {resignedEmployees.length}
+                </span>
+              )}
+            </button>
+            <button 
+              onClick={() => setActiveSubModule('bulk')}
+              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+                activeSubModule === 'bulk' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Bulk Actions & Mailing
+            </button>
+            <button 
+              onClick={() => setActiveSubModule('roles')}
+              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+                activeSubModule === 'roles' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Role & Permissions
+            </button>
+            <button 
+              onClick={() => setActiveSubModule('departments')}
+              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+                activeSubModule === 'departments' 
+                  ? 'border-primary text-primary' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Departments
+            </button>
+          </>
+        )}
       </div>
 
       {/* ======================================= */}
@@ -2060,17 +2091,19 @@ export const EmployeeManagement: React.FC = () => {
                     }`}>
                       {emp.status}
                     </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenResetCredModal({ id: emp.id, name: emp.name, email: emp.email });
-                      }}
-                      className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 px-2 py-0.5 rounded-lg transition-colors"
-                      title="Reset Login Credentials"
-                    >
-                      <Key className="h-3 w-3" />
-                      Reset Login
-                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenResetCredModal({ id: emp.id, name: emp.name, email: emp.email });
+                        }}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 px-2 py-0.5 rounded-lg transition-colors"
+                        title="Reset Login Credentials"
+                      >
+                        <Key className="h-3 w-3" />
+                        Reset Login
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2123,17 +2156,19 @@ export const EmployeeManagement: React.FC = () => {
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenResetCredModal({ id: emp.id, name: emp.name, email: emp.email });
-                            }}
-                            className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 px-2.5 py-1 rounded-lg transition-colors"
-                            title="Reset Login Credentials"
-                          >
-                            <Key className="h-3 w-3" />
-                            Reset Login
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenResetCredModal({ id: emp.id, name: emp.name, email: emp.email });
+                              }}
+                              className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 px-2.5 py-1 rounded-lg transition-colors"
+                              title="Reset Login Credentials"
+                            >
+                              <Key className="h-3 w-3" />
+                              Reset Login
+                            </button>
+                          )}
                           <ChevronRight className="h-4 w-4 text-slate-400 inline" />
                         </div>
                       </td>
@@ -3667,6 +3702,21 @@ export const EmployeeManagement: React.FC = () => {
                     placeholder="e.g. Frontend Developer" 
                     className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300"
                   />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-medium">Organization Role (Permissions)</label>
+                  <select 
+                    value={newEmp.roleId || ''} 
+                    onChange={(e) => setNewEmp({ ...newEmp, roleId: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold"
+                  >
+                    <option value="">-- Select Organization Role --</option>
+                    {orgRoles.map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} {r.description ? `(${r.description})` : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-slate-400 font-medium">Gender</label>

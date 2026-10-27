@@ -88,11 +88,13 @@ export const useCreatePermission = () => {
  * Hook to retrieve all roles (with associated permissions)
  * GET /api/v1/admin/roles
  */
-export const useRoles = () => {
+export const useRoles = (organizationId?: string | null) => {
   return useQuery<BaseResponse<Role[]>, Error>({
-    queryKey: ['roles'],
+    queryKey: ['roles', organizationId || 'default'],
     queryFn: async () => {
-      const response = await apiClient.get<BaseResponse<Role[]>>('/admin/roles');
+      const response = await apiClient.get<BaseResponse<Role[]>>('/admin/roles', {
+        params: organizationId ? { organizationId } : undefined,
+      });
       return response.data;
     },
   });

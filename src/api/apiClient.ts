@@ -22,6 +22,11 @@ api.interceptors.request.use((request) => {
   if (token) {
     request.headers.Authorization = `Bearer ${token}`;
   }
+
+  const orgId = localStorage.getItem('organizationId');
+  if (orgId) {
+    request.headers['x-organization-id'] = orgId;
+  }
   
   // For FormData requests, delete default Content-Type so browser sets boundary automatically
   if (request.data instanceof FormData) {
