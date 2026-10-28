@@ -1,4 +1,5 @@
 import {
+  Calendar,
   Camera,
   Check,
   Clock,
@@ -7,6 +8,8 @@ import {
   FileText,
   Filter,
   Lock,
+  LogIn,
+  LogOut,
   MapPin,
   Search,
   Users,
@@ -30,9 +33,140 @@ import {
   useUpdateRegularization
 } from '../api/hook/useAttendance';
 import { useEmployees } from '../api/hook/useEmployee';
+import { useProfile } from '../api/hook/useAuth';
 import { useApp } from '../context/AppContext';
 
-import { useProfile } from '../api/hook/useAuth';
+const getCurrentIsoWeek = (): string => {
+  const date = new Date();
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${weekNo < 10 ? '0' + weekNo : weekNo}`;
+};
+
+const getWeekOptions = (currentWeek: string) => {
+  const match = currentWeek.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return [{ key: currentWeek, label: currentWeek, isCurrent: true }];
+  const year = parseInt(match[1], 10);
+  const week = parseInt(match[2], 10);
+
+  const list: { key: string; label: string; isCurrent: boolean }[] = [];
+  for (let offset = -2; offset <= 2; offset++) {
+    let w = week + offset;
+    let y = year;
+    if (w < 1) {
+      w += 52;
+      y -= 1;
+    } else if (w > 52) {
+      w -= 52;
+      y += 1;
+    }
+    const key = `${y}-W${w < 10 ? '0' + w : w}`;
+    list.push({
+      key,
+      label: key === currentWeek ? `${key} (Current Week)` : key,
+      isCurrent: key === currentWeek,
+    });
+  }
+  return list;
+};
+
+const parseTimeToMinutes = (timeStr?: string): number | null => {
+  if (!timeStr || timeStr === '-' || timeStr.toLowerCase() === 'custom') return null;
+  const match = timeStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return null;
+  let hrs = parseInt(match[1], 10);
+  const mins = parseInt(match[2], 10);
+  const ampm = match[3] ? match[3].toUpperCase() : null;
+
+  if (ampm) {
+    if (ampm === 'PM' && hrs < 12) hrs += 12;
+    if (ampm === 'AM' && hrs === 12) hrs = 0;
+  }
+  return hrs * 60 + mins;
+};
+
+const formatMinutesTo12h = (totalMins: number): string => {
+  let m = totalMins % 1440;
+  if (m < 0) m += 1440;
+  let hrs = Math.floor(m / 60);
+  const mins = m % 60;
+  const ampm = hrs >= 12 ? 'PM' : 'AM';
+  hrs = hrs % 12;
+  if (hrs === 0) hrs = 12;
+  return `${hrs < 10 ? '0' + hrs : hrs}:${mins < 10 ? '0' + mins : mins} ${ampm}`;
+};
+
+const validateShiftTimeWindow = (
+  type: 'In' | 'Out',
+  shift: { name?: string; startTime?: string; endTime?: string; code?: string }
+): { allowed: boolean; title?: string; message?: string } => {
+  if (!shift || shift.code === 'OFF') {
+    return {
+      allowed: false,
+      title: 'Week Off Restriction 🏖️',
+      message: 'Today is scheduled as your Week Off according to your assigned shift roster.',
+    };
+  }
+
+  const startMins = parseTimeToMinutes(shift.startTime);
+  const endMins = parseTimeToMinutes(shift.endTime);
+
+  if (startMins === null || endMins === null) {
+    return { allowed: true };
+  }
+
+  const now = new Date();
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+  const isOvernight = endMins <= startMins;
+
+  if (type === 'In') {
+    const earlyBuffer = 60;
+    const earliestIn = startMins - earlyBuffer;
+
+    if (!isOvernight) {
+      if (currentMins < earliestIn) {
+        return {
+          allowed: false,
+          title: 'Punch In Too Early ⏰',
+          message: `Your assigned shift (${shift.name}) starts at ${shift.startTime}.\n\nEarliest check-in allowed is ${formatMinutesTo12h(earliestIn)} (60 mins prior).`,
+        };
+      }
+      if (currentMins > endMins) {
+        return {
+          allowed: false,
+          title: 'Shift Has Ended ⏰',
+          message: `Your assigned shift (${shift.name}) ended at ${shift.endTime}.\n\nPunch IN is not permitted after shift end time.`,
+        };
+      }
+    } else {
+      const earliestInNorm = (earliestIn + 1440) % 1440;
+      const isBeforeEarlyIn = currentMins < earliestInNorm && currentMins > endMins;
+      if (isBeforeEarlyIn) {
+        return {
+          allowed: false,
+          title: 'Punch In Too Early ⏰',
+          message: `Your assigned overnight shift (${shift.name}) starts at ${shift.startTime}.\n\nEarliest check-in allowed is ${formatMinutesTo12h(earliestInNorm)}.`,
+        };
+      }
+    }
+  } else {
+    if (!isOvernight) {
+      const earliestOut = Math.max(startMins + 30, endMins - 30);
+      if (currentMins < earliestOut) {
+        return {
+          allowed: false,
+          title: 'Early Departure Restricted ⚠️',
+          message: `Your assigned shift (${shift.name}) is scheduled from ${shift.startTime} to ${shift.endTime}.\n\nPunch OUT is only permitted near shift end (from ${formatMinutesTo12h(earliestOut)} onwards).`,
+        };
+      }
+    }
+  }
+
+  return { allowed: true };
+};
 
 export const Attendance: React.FC = () => {
   const { activeSubModule, setActiveSubModule, addAuditLog, userRole, showConfirm, showAlert } = useApp();
@@ -111,11 +245,194 @@ export const Attendance: React.FC = () => {
   const [createAssignDays, setCreateAssignDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
 
   const [showAssignShiftModal, setShowAssignShiftModal] = useState(false);
-  const [assignShiftTargetName, setAssignShiftTargetName] = useState('General');
+  const [assignShiftTargetName, setAssignShiftTargetName] = useState('');
   const [assignType, setAssignType] = useState<'single' | 'bulk'>('single');
   const [assignSingleEmpId, setAssignSingleEmpId] = useState('');
   const [assignBulkEmpIds, setAssignBulkEmpIds] = useState<string[]>([]);
   const [assignSelectedDays, setAssignSelectedDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+  // Dynamic Roster Shift States & Backend API Hooks
+  const [rosterWeek, setRosterWeek] = useState(getCurrentIsoWeek());
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [employeeShifts, setEmployeeShifts] = useState<Record<string, Record<string, string>>>({});
+
+  const { data: dbRostersRes, isLoading: rostersLoading } = useRosters(rosterWeek);
+  const saveRostersMut = useSaveRosters();
+
+  // Populate shift data from backend DB when fetched, or fallback to live employee defaults
+  useEffect(() => {
+    if (shiftTimingsList.length > 0 && (!assignShiftTargetName || !shiftTimingsList.some(st => st.name === assignShiftTargetName))) {
+      setAssignShiftTargetName(shiftTimingsList[0].name);
+    }
+  }, [shiftTimingsList, assignShiftTargetName]);
+
+  useEffect(() => {
+    if (dbRostersRes?.data && dbRostersRes.data.length > 0) {
+      const loaded: Record<string, Record<string, string>> = {};
+      dbRostersRes.data.forEach(item => {
+        loaded[item.employeeId] = {
+          Mon: item.mon,
+          Tue: item.tue,
+          Wed: item.wed,
+          Thu: item.thu,
+          Fri: item.fri,
+          Sat: item.sat,
+          Sun: item.sun,
+        };
+      });
+      setEmployeeShifts(loaded);
+    } else if (employeesList.length > 0) {
+      const defaultShiftName = shiftTimingsList[0]?.name || 'General';
+      setEmployeeShifts(prev => {
+        const updated = { ...prev };
+        employeesList.forEach((emp, index) => {
+          if (!updated[emp.id]) {
+            updated[emp.id] = {
+              Mon: defaultShiftName,
+              Tue: defaultShiftName,
+              Wed: defaultShiftName,
+              Thu: defaultShiftName,
+              Fri: defaultShiftName,
+              Sat: index % 2 === 0 ? 'Week Off' : defaultShiftName,
+              Sun: 'Week Off'
+            };
+          }
+        });
+        return updated;
+      });
+    }
+  }, [dbRostersRes, employeesList, shiftTimingsList]);
+
+  // Current Date & Day Calculation
+  const currentTodayDate = React.useMemo(() => new Date(), []);
+  const currentTodayDayLong = React.useMemo(() => currentTodayDate.toLocaleDateString('en-US', { weekday: 'long' }), [currentTodayDate]);
+  const currentTodayDateFormatted = React.useMemo(() => currentTodayDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }), [currentTodayDate]);
+  const todayDateString = React.useMemo(() => currentTodayDate.toDateString(), [currentTodayDate]);
+
+  // Today's IN & OUT Punch Times for selectedEmpId
+  const { todayPunchInTime, todayPunchOutTime } = React.useMemo(() => {
+    let punchIn: string | null = null;
+    let punchOut: string | null = null;
+
+    punchLogList.forEach((log: any) => {
+      let logDate: Date | null = null;
+      if (log.createdAt) {
+        const d = new Date(log.createdAt);
+        if (!isNaN(d.getTime())) logDate = d;
+      }
+      if (!logDate && log.time) {
+        const d = new Date(log.time);
+        if (!isNaN(d.getTime())) logDate = d;
+      }
+      if (!logDate) logDate = new Date();
+
+      if (logDate.toDateString() === todayDateString) {
+        let timePart = log.time || '';
+        if (timePart.includes(',')) {
+          timePart = timePart.split(',')[1]?.trim() || timePart;
+        }
+        if (log.type === 'In' && !punchIn) {
+          punchIn = timePart || logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else if (log.type === 'Out') {
+          punchOut = timePart || logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+      }
+    });
+
+    return { todayPunchInTime: punchIn, todayPunchOutTime: punchOut };
+  }, [punchLogList, todayDateString]);
+
+  // Today's Assigned Shift Resolution for selectedEmpId
+  const currentAssignedShiftDetail = React.useMemo(() => {
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+    const dayTitles = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+    const dayIdx = currentTodayDate.getDay();
+    const dayLower = dayKeys[dayIdx];
+    const dayTitle = dayTitles[dayIdx];
+
+    // Check in local employeeShifts first
+    let rawShift = employeeShifts[selectedEmpId]?.[dayTitle] || employeeShifts[selectedEmpId]?.[dayLower];
+
+    // If not in local state, check dbRostersRes
+    if (!rawShift && dbRostersRes?.data) {
+      const rosterItem = dbRostersRes.data.find(r => 
+        r.employeeId === selectedEmpId || 
+        r.employeeId === activeEmployee?.id ||
+        (r.employee && r.employee.id === selectedEmpId)
+      );
+      if (rosterItem) {
+        rawShift = (rosterItem as any)[dayLower];
+      }
+    }
+
+    if (!rawShift) {
+      rawShift = 'Morning';
+    }
+
+    const rawUpper = String(rawShift).trim().toUpperCase();
+
+    if (rawUpper === 'OFF' || rawUpper === 'WEEK OFF' || rawUpper === 'WEEKOFF' || rawUpper === 'WO') {
+      return { code: 'OFF', name: 'Week Off', startTime: '-', endTime: '-', shortLabel: 'OFF', color: '#94a3b8', bgColor: '#f1f5f9' };
+    }
+
+    // 1. Exact match by code, name, or id (case-insensitive)
+    let found = shiftTimingsList.find(t => 
+      t.code?.trim().toUpperCase() === rawUpper ||
+      t.name?.trim().toUpperCase() === rawUpper ||
+      t.id === rawShift
+    );
+
+    // 2. Partial/contains match by code or name
+    if (!found) {
+      found = shiftTimingsList.find(t => {
+        const tCode = (t.code || '').trim().toUpperCase();
+        const tName = (t.name || '').trim().toUpperCase();
+        return (
+          tName.includes(rawUpper) ||
+          rawUpper.includes(tName) ||
+          tCode.includes(rawUpper) ||
+          rawUpper.includes(tCode)
+        );
+      });
+    }
+
+    // 3. Keyword matching for common shift types
+    if (!found) {
+      if (rawUpper.includes('MORN')) {
+        found = shiftTimingsList.find(t => (t.name || '').toUpperCase().includes('MORN') || (t.code || '').toUpperCase().includes('MORN'));
+      } else if (rawUpper.includes('EVEN')) {
+        found = shiftTimingsList.find(t => (t.name || '').toUpperCase().includes('EVEN') || (t.code || '').toUpperCase().includes('EVEN'));
+      } else if (rawUpper.includes('NIGHT')) {
+        found = shiftTimingsList.find(t => (t.name || '').toUpperCase().includes('NIGHT') || (t.code || '').toUpperCase().includes('NIGHT'));
+      } else if (rawUpper.includes('GEN')) {
+        found = shiftTimingsList.find(t => (t.name || '').toUpperCase().includes('GEN') || (t.code || '').toUpperCase().includes('GEN'));
+      }
+    }
+
+    if (found) {
+      return {
+        id: found.id,
+        code: found.code,
+        name: found.name,
+        startTime: found.startTime || '09:00 AM',
+        endTime: found.endTime || '06:00 PM',
+        shortLabel: found.shortLabel || found.code || found.name?.slice(0, 3).toUpperCase(),
+        color: found.color || '#4f46e5',
+        bgColor: found.bgColor || `${found.color || '#4f46e5'}18`,
+      };
+    }
+
+    // Standard Fallbacks
+    if (rawUpper.includes('EVEN')) {
+      return { code: 'EVENING', name: 'Evening Shift', startTime: '02:00 PM', endTime: '11:00 PM', shortLabel: 'E (14-23)', color: '#8b5cf6', bgColor: 'rgba(139, 92, 246, 0.12)' };
+    }
+    if (rawUpper.includes('NIGHT')) {
+      return { code: 'NIGHT', name: 'Night Shift', startTime: '10:00 PM', endTime: '07:00 AM', shortLabel: 'N (22-07)', color: '#38bdf8', bgColor: 'rgba(56, 189, 248, 0.12)' };
+    }
+    if (rawUpper.includes('GEN')) {
+      return { code: 'GENERAL', name: 'General Shift', startTime: '09:30 AM', endTime: '06:30 PM', shortLabel: 'G (09-18)', color: '#10b981', bgColor: 'rgba(16, 185, 129, 0.12)' };
+    }
+    return { code: rawUpper, name: `${rawShift} Shift`, startTime: '09:00 AM', endTime: '06:00 PM', shortLabel: rawUpper.slice(0, 3), color: '#4f46e5', bgColor: 'rgba(79, 70, 229, 0.12)' };
+  }, [currentTodayDate, employeeShifts, selectedEmpId, dbRostersRes?.data, activeEmployee?.id, shiftTimingsList]);
 
   const handleCreateShiftTiming = (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,33 +461,47 @@ export const Attendance: React.FC = () => {
       {
         onSuccess: () => {
           let assignedCount = 0;
+          const updatedShifts = { ...employeeShifts };
           if (createAssignMode === 'single' && createAssignSingleEmpId) {
-            setEmployeeShifts(prev => {
-              const updated = { ...prev };
-              const currentDays = updated[createAssignSingleEmpId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
-              const newDays = { ...currentDays };
-              createAssignDays.forEach(day => { newDays[day] = shiftNameClean; });
-              updated[createAssignSingleEmpId] = newDays;
-              return updated;
-            });
+            const currentDays = updatedShifts[createAssignSingleEmpId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
+            const newDays = { ...currentDays };
+            createAssignDays.forEach(day => { newDays[day] = shiftNameClean; });
+            updatedShifts[createAssignSingleEmpId] = newDays;
             assignedCount = 1;
           } else if (createAssignMode === 'bulk' && createAssignBulkEmpIds.length > 0) {
-            setEmployeeShifts(prev => {
-              const updated = { ...prev };
-              createAssignBulkEmpIds.forEach(empId => {
-                const currentDays = updated[empId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
-                const newDays = { ...currentDays };
-                createAssignDays.forEach(day => { newDays[day] = shiftNameClean; });
-                updated[empId] = newDays;
-              });
-              return updated;
+            createAssignBulkEmpIds.forEach(empId => {
+              const currentDays = updatedShifts[empId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
+              const newDays = { ...currentDays };
+              createAssignDays.forEach(day => { newDays[day] = shiftNameClean; });
+              updatedShifts[empId] = newDays;
             });
             assignedCount = createAssignBulkEmpIds.length;
           }
 
+          if (assignedCount > 0) {
+            setEmployeeShifts(updatedShifts);
+
+            // Auto-save and sync to backend database
+            const payloadRosters = Object.entries(updatedShifts).map(([empId, days]) => ({
+              employeeId: empId,
+              mon: days.Mon || 'General',
+              tue: days.Tue || 'General',
+              wed: days.Wed || 'General',
+              thu: days.Thu || 'General',
+              fri: days.Fri || 'General',
+              sat: days.Sat || 'Week Off',
+              sun: days.Sun || 'Week Off',
+            }));
+
+            saveRostersMut.mutate({
+              week: rosterWeek,
+              rosters: payloadRosters,
+            });
+          }
+
           addAuditLog('Created Organization Shift', 'Attendance Module', `Added new shift timing ${shiftNameClean} (${newShiftStart} - ${newShiftEnd})`);
           showAlert(
-            `Organization shift "${shiftNameClean}" saved successfully${assignedCount > 0 ? ` and assigned to ${assignedCount} employee(s)!` : '!'}`,
+            `Organization shift "${shiftNameClean}" saved successfully${assignedCount > 0 ? ` and assigned to ${assignedCount} employee(s) in DB!` : '!'}`,
             'Shift Added',
             'success'
           );
@@ -214,21 +545,45 @@ export const Attendance: React.FC = () => {
       targetEmpIds.push(...assignBulkEmpIds);
     }
 
-    setEmployeeShifts(prev => {
-      const updated = { ...prev };
-      targetEmpIds.forEach(empId => {
-        const currentDays = updated[empId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
-        const newDays = { ...currentDays };
-        assignSelectedDays.forEach(day => { newDays[day] = assignShiftTargetName; });
-        updated[empId] = newDays;
-      });
-      return updated;
+    const updatedShifts = { ...employeeShifts };
+    targetEmpIds.forEach(empId => {
+      const currentDays = updatedShifts[empId] || { Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off' };
+      const newDays = { ...currentDays };
+      assignSelectedDays.forEach((day: string) => { newDays[day] = assignShiftTargetName; });
+      updatedShifts[empId] = newDays;
     });
+
+    setEmployeeShifts(updatedShifts);
 
     const empCountStr = assignType === 'single' ? '1 employee' : `${targetEmpIds.length} employees`;
     addAuditLog('Assigned Shift Roster', 'Attendance Module', `Assigned ${assignShiftTargetName} shift to ${empCountStr} for days [${assignSelectedDays.join(', ')}]`);
-    showAlert(`Successfully assigned "${assignShiftTargetName}" shift to ${empCountStr}!`, 'Shift Assigned', 'success');
+
+    // Auto-save & publish to database immediately
+    const payloadRosters = Object.entries(updatedShifts).map(([empId, days]) => ({
+      employeeId: empId,
+      mon: days.Mon || 'General',
+      tue: days.Tue || 'General',
+      wed: days.Wed || 'General',
+      thu: days.Thu || 'General',
+      fri: days.Fri || 'General',
+      sat: days.Sat || 'Week Off',
+      sun: days.Sun || 'Week Off',
+    }));
+
+    saveRostersMut.mutate({
+      week: rosterWeek,
+      rosters: payloadRosters,
+    }, {
+      onSuccess: () => {
+        showAlert(`Successfully assigned "${assignShiftTargetName}" shift to ${empCountStr} and saved to database!`, 'Shift Assigned', 'success');
+      },
+      onError: (err: any) => {
+        showAlert(`Assigned locally, but backend sync returned: ${err?.response?.data?.message || err?.message || 'Error'}`, 'Warning', 'warning');
+      }
+    });
+
     setShowAssignShiftModal(false);
+    setAssignSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
   };
 
   const handleDeleteShiftTiming = (id: string, name: string) => {
@@ -294,14 +649,12 @@ export const Attendance: React.FC = () => {
       return false;
     }
 
-    // 1. SHIFT TIMING VALIDATION
-    const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'short' });
-    const empShiftToday = employeeShifts[selectedEmpId]?.[todayDayName] || 'General';
-
-    if (empShiftToday === 'Week Off' || empShiftToday === 'OFF') {
+    // 1. SHIFT TIMING & TIME WINDOW VALIDATION
+    const shiftValidation = validateShiftTimeWindow(punchType, currentAssignedShiftDetail);
+    if (!shiftValidation.allowed) {
       showAlert(
-        `Today (${todayDayName}) is scheduled as your Week Off according to your assigned shift roster.`,
-        'Week Off Restriction 🏖️',
+        shiftValidation.message || 'You cannot punch at this time according to your assigned shift.',
+        shiftValidation.title || 'Shift Timing Restriction ⏰',
         'warning'
       );
       return false;
@@ -407,7 +760,7 @@ export const Attendance: React.FC = () => {
     });
 
     // Marker for the new/selected geofence center
-    const activeMarker = new googleMaps.Marker({
+    new googleMaps.Marker({
       position: mapCenter,
       map: map,
       title: newFenceName || "Selected Geofence Center",
@@ -421,7 +774,7 @@ export const Attendance: React.FC = () => {
     });
 
     // Draw active fence circle
-    const activeCircle = new googleMaps.Circle({
+    new googleMaps.Circle({
       strokeColor: "#6366f1",
       strokeOpacity: 0.8,
       strokeWeight: 2,
@@ -627,50 +980,7 @@ export const Attendance: React.FC = () => {
   const [reportYear, setReportYear] = useState('2026');
   const [reportSearch, setReportSearch] = useState('');
 
-  // Dynamic Roster Shift States & Backend API Hooks
-  const [rosterWeek, setRosterWeek] = useState('Week 27 (Jul 1 - Jul 5)');
-  const [rosterSearch, setRosterSearch] = useState('');
-  const [employeeShifts, setEmployeeShifts] = useState<Record<string, Record<string, string>>>({});
-
-  const { data: dbRostersRes, isLoading: rostersLoading } = useRosters(rosterWeek);
-  const saveRostersMut = useSaveRosters();
-
-  // Populate shift data from backend DB when fetched, or fallback to live employee defaults
-  useEffect(() => {
-    if (dbRostersRes?.data && dbRostersRes.data.length > 0) {
-      const loaded: Record<string, Record<string, string>> = {};
-      dbRostersRes.data.forEach(item => {
-        loaded[item.employeeId] = {
-          Mon: item.mon,
-          Tue: item.tue,
-          Wed: item.wed,
-          Thu: item.thu,
-          Fri: item.fri,
-          Sat: item.sat,
-          Sun: item.sun,
-        };
-      });
-      setEmployeeShifts(loaded);
-    } else if (employeesList.length > 0) {
-      setEmployeeShifts(prev => {
-        const updated = { ...prev };
-        employeesList.forEach((emp, index) => {
-          if (!updated[emp.id]) {
-            updated[emp.id] = {
-              Mon: 'General',
-              Tue: 'General',
-              Wed: 'General',
-              Thu: 'General',
-              Fri: 'General',
-              Sat: index % 2 === 0 ? 'Week Off' : 'Morning',
-              Sun: 'Week Off'
-            };
-          }
-        });
-        return updated;
-      });
-    }
-  }, [dbRostersRes, employeesList]);
+  // (Dynamic Roster Shift States & Backend API Hooks are initialized above)
 
   const handleShiftChange = (empId: string, day: string, shiftVal: string) => {
     setEmployeeShifts(prev => ({
@@ -1082,8 +1392,68 @@ export const Attendance: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in text-xs">
           
           {/* Left panel (col-span-5): Punch settings, verification & submit */}
-          <div className="lg:col-span-5 space-y-6">
+          <div className="lg:col-span-5 space-y-5">
             
+            {/* Assigned Shift & Geofence Location Status Card (Matching Mobile App) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3.5 relative overflow-hidden">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-slate-400" />
+                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                      ASSIGNED SHIFT ({currentTodayDayLong.toUpperCase()})
+                    </span>
+                  </div>
+                  <h4 
+                    className="text-sm sm:text-base font-extrabold"
+                    style={{ color: currentAssignedShiftDetail.color || '#4f46e5' }}
+                  >
+                    {currentAssignedShiftDetail.name} ({currentAssignedShiftDetail.startTime} - {currentAssignedShiftDetail.endTime})
+                  </h4>
+                </div>
+
+                <span 
+                  className="px-2.5 py-1 rounded-xl text-[10px] font-extrabold uppercase border shadow-2xs shrink-0"
+                  style={{
+                    backgroundColor: currentAssignedShiftDetail.bgColor || `${currentAssignedShiftDetail.color || '#4f46e5'}18`,
+                    color: currentAssignedShiftDetail.color || '#4f46e5',
+                    borderColor: currentAssignedShiftDetail.color || '#4f46e5',
+                  }}
+                >
+                  {currentAssignedShiftDetail.shortLabel || currentAssignedShiftDetail.code}
+                </span>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                <MapPin className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                <span className="text-[11px] font-medium truncate">
+                  Geofence Zone: <strong className="text-slate-800 dark:text-white">{activeFenceMatch?.name || (fencesList[0]?.name ?? 'Main Office Ranchi')}</strong> • Authorized Location 📍
+                </span>
+              </div>
+            </div>
+
+            {/* Today's Date & Punch Status Card */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2.5">
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200 font-bold text-xs">
+                <Calendar className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <span>{currentTodayDayLong}, {currentTodayDateFormatted}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className={`px-3 py-2 rounded-xl flex items-center gap-2 font-bold text-xs ${
+                  todayPunchInTime ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-slate-50 text-slate-500 dark:bg-slate-950/60 dark:text-slate-400 border border-slate-200 dark:border-slate-800'
+                }`}>
+                  <LogIn className="h-3.5 w-3.5" />
+                  <span>IN: {todayPunchInTime || '--:--'}</span>
+                </div>
+                <div className={`px-3 py-2 rounded-xl flex items-center gap-2 font-bold text-xs ${
+                  todayPunchOutTime ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800' : 'bg-slate-50 text-slate-500 dark:bg-slate-950/60 dark:text-slate-400 border border-slate-200 dark:border-slate-800'
+                }`}>
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>OUT: {todayPunchOutTime || '--:--'}</span>
+                </div>
+              </div>
+            </div>
+
             {/* Main Action card */}
             <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
               <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2 flex items-center justify-between">
@@ -1444,10 +1814,10 @@ export const Attendance: React.FC = () => {
                 onChange={(e) => setRosterWeek(e.target.value)}
                 className="px-3 py-1.5 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-300 font-bold focus:outline-none text-xs"
               >
+                {getWeekOptions(getCurrentIsoWeek()).map(w => (
+                  <option key={w.key} value={w.key}>{w.label}</option>
+                ))}
                 <option value="Week 27 (Jul 1 - Jul 5)">Week 27 (Jul 1 - Jul 5)</option>
-                <option value="Week 28 (Jul 6 - Jul 12)">Week 28 (Jul 6 - Jul 12)</option>
-                <option value="Week 29 (Jul 13 - Jul 19)">Week 29 (Jul 13 - Jul 19)</option>
-                <option value="Week 30 (Jul 20 - Jul 26)">Week 30 (Jul 20 - Jul 26)</option>
               </select>
 
               {/* Add Shift Button */}
@@ -1464,7 +1834,12 @@ export const Attendance: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setAssignShiftTargetName(shiftTimingsList[0]?.name || 'General');
+                  if (shiftTimingsList.length === 0) {
+                    showAlert('Please create at least one Organization Shift first using "+ Add Shift".', 'No Organization Shifts', 'warning');
+                    return;
+                  }
+                  setAssignShiftTargetName(shiftTimingsList[0]?.name || '');
+                  setAssignSelectedDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
                   setShowAssignShiftModal(true);
                 }}
                 className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold shadow-sm hover:shadow transition-all text-xs flex items-center gap-1.5 cursor-pointer"
@@ -1553,7 +1928,7 @@ export const Attendance: React.FC = () => {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <div className="space-y-1">
                       <label className="text-slate-500 font-bold uppercase text-[10px]">Start Time *</label>
                       <input
@@ -1574,6 +1949,15 @@ export const Attendance: React.FC = () => {
                         onChange={(e) => setNewShiftEnd(e.target.value)}
                         required
                         className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-slate-500 font-bold uppercase text-[10px]">Color</label>
+                      <input
+                        type="color"
+                        value={newShiftColor}
+                        onChange={(e) => setNewShiftColor(e.target.value)}
+                        className="w-full h-[38px] p-1 border rounded-xl bg-slate-50 dark:bg-slate-950 cursor-pointer"
                       />
                     </div>
                   </div>
@@ -1731,18 +2115,18 @@ export const Attendance: React.FC = () => {
                     <select
                       value={assignShiftTargetName}
                       onChange={(e) => setAssignShiftTargetName(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none font-bold"
+                      required
+                      className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none font-bold cursor-pointer"
                     >
-                      <option value="General">General (09:30 AM - 06:30 PM)</option>
-                      <option value="Morning">Morning (06:00 AM - 02:30 PM)</option>
-                      <option value="Evening">Evening (02:00 PM - 10:30 PM)</option>
-                      <option value="Night">Night (10:00 PM - 06:30 AM)</option>
-                      <option value="Week Off">Week Off</option>
-                      {shiftTimingsList.map(st => (
-                        <option key={st.id || st.name} value={st.name}>
-                          {st.name} ({st.startTime} - {st.endTime})
-                        </option>
-                      ))}
+                      {shiftTimingsList.length === 0 ? (
+                        <option value="" disabled>-- No Organization Shifts Found (Please Add Shift First) --</option>
+                      ) : (
+                        shiftTimingsList.map(st => (
+                          <option key={st.id || st.code || st.name} value={st.name}>
+                            {st.name} ({st.startTime} - {st.endTime})
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 
@@ -1856,8 +2240,8 @@ export const Attendance: React.FC = () => {
                           key={day}
                           type="button"
                           onClick={() => {
-                            setAssignSelectedDays(prev => 
-                              prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+                            setAssignSelectedDays((prev: string[]) => 
+                              prev.includes(day) ? prev.filter((d: string) => d !== day) : [...prev, day]
                             );
                           }}
                           className={`px-3 py-1.5 rounded-xl font-extrabold border text-xs cursor-pointer transition-all ${assignSelectedDays.includes(day) ? 'bg-purple-600 text-white border-purple-600 shadow-xs' : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'}`}
@@ -1916,16 +2300,17 @@ export const Attendance: React.FC = () => {
                   employeesList
                     .filter(e => e.name.toLowerCase().includes(rosterSearch.toLowerCase()) || e.id.toLowerCase().includes(rosterSearch.toLowerCase()))
                     .map((emp) => {
+                      const defaultShiftName = shiftTimingsList[0]?.name || 'General';
                       const shiftsForEmp = employeeShifts[emp.id] || {
-                        Mon: 'General', Tue: 'General', Wed: 'General', Thu: 'General', Fri: 'General', Sat: 'Week Off', Sun: 'Week Off'
+                        Mon: defaultShiftName, Tue: defaultShiftName, Wed: defaultShiftName, Thu: defaultShiftName, Fri: defaultShiftName, Sat: 'Week Off', Sun: 'Week Off'
                       };
 
                       const getShiftStyle = (val: string) => {
                         const norm = (val || '').trim().toUpperCase();
+                        if (norm === 'OFF' || norm === 'WEEK OFF' || norm === 'WO') return 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700';
                         if (norm === 'MORNING' || norm === 'M') return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800/60';
                         if (norm === 'EVENING' || norm === 'E') return 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800/60';
                         if (norm === 'NIGHT' || norm === 'N') return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/60';
-                        if (norm === 'OFF' || norm === 'WEEK OFF' || norm === 'WO') return 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700';
                         return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800/60';
                       };
 
@@ -1946,14 +2331,18 @@ export const Attendance: React.FC = () => {
                           </td>
 
                           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => {
-                            const rawVal = shiftsForEmp[day] || 'General';
+                            const rawVal = shiftsForEmp[day] || (day === 'Sun' ? 'Week Off' : defaultShiftName);
                             const norm = (rawVal || '').trim().toUpperCase();
-                            const val = (norm === 'MORNING' || norm === 'M') ? 'Morning'
-                                      : (norm === 'EVENING' || norm === 'E') ? 'Evening'
-                                      : (norm === 'NIGHT' || norm === 'N') ? 'Night'
-                                      : (norm === 'OFF' || norm === 'WEEK OFF' || norm === 'WO') ? 'Week Off'
-                                      : (norm === 'GENERAL' || norm === 'G') ? 'General'
-                                      : rawVal;
+                            const isOff = norm === 'OFF' || norm === 'WEEK OFF' || norm === 'WEEKOFF' || norm === 'WO';
+                            
+                            // Match with organization created shift
+                            const matchedShift = shiftTimingsList.find(st => 
+                              st.name?.trim().toUpperCase() === norm ||
+                              st.code?.trim().toUpperCase() === norm ||
+                              st.id === rawVal
+                            );
+
+                            const val = isOff ? 'Week Off' : (matchedShift ? matchedShift.name : rawVal);
 
                             return (
                               <td key={day} className="p-2 text-center">
@@ -1962,16 +2351,19 @@ export const Attendance: React.FC = () => {
                                   onChange={(e) => handleShiftChange(emp.id, day, e.target.value)}
                                   className={`w-full text-[11px] font-extrabold px-2 py-1 rounded-lg border focus:outline-none text-center cursor-pointer transition-all ${getShiftStyle(val)}`}
                                 >
-                                  <option value="General" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">General</option>
-                                  <option value="Morning" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Morning</option>
-                                  <option value="Evening" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Evening</option>
-                                  <option value="Night" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Night</option>
-                                  <option value="Week Off" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Week Off</option>
+                                  {!shiftTimingsList.some(st => (st.name || '').trim().toUpperCase() === 'WEEK OFF' || (st.code || '').trim().toUpperCase() === 'OFF') && (
+                                    <option value="Week Off" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">Week Off</option>
+                                  )}
                                   {shiftTimingsList.map(st => (
-                                    <option key={st.id || st.code} value={st.code || st.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                    <option key={st.id || st.code || st.name} value={st.name} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
                                       {st.name}
                                     </option>
                                   ))}
+                                  {val !== 'Week Off' && !shiftTimingsList.some(st => st.name === val || st.code === val) && (
+                                    <option value={val} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                      {val}
+                                    </option>
+                                  )}
                                 </select>
                               </td>
                             );
