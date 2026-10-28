@@ -38,15 +38,97 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
-  const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin' || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'Super Admin';
+  const roleStr = (userRole || currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || currentUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+  void isEmployee;
 
-  const menuItems: MenuItem[] = [
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+
+  const getSubItemPermissions = (moduleId: string, subId: string): string[] => {
+    const modUpper = moduleId.toUpperCase();
+    switch (moduleId) {
+      case 'employees':
+        if (subId === 'directory') return [`VIEW_${modUpper}`, 'VIEW_EMPLOYEE_DIRECTORY'];
+        if (subId === 'master') return ['VIEW_EMPLOYEE_MASTER', 'UPDATE_EMPLOYEE_MASTER'];
+        if (subId === 'idcard') return [`VIEW_${modUpper}`, 'VIEW_EMPLOYEE_DIRECTORY'];
+        if (subId === 'orgchart') return [`VIEW_${modUpper}`, 'VIEW_ORGANIZATION_CHART'];
+        if (subId === 'exit' || subId === 'resignation') return ['VIEW_EXIT_SETTLEMENT', 'UPDATE_EXIT_SETTLEMENT'];
+        if (subId === 'bulk') return ['MANAGE_BULK_IMPORTS'];
+        if (subId === 'roles') return ['VIEW_ROLES_PERMISSIONS', 'UPDATE_ROLES_PERMISSIONS', 'VIEW_ADMIN'];
+        if (subId === 'departments') return ['VIEW_DEPARTMENTS', 'UPDATE_DEPARTMENTS'];
+        break;
+      case 'attendance':
+        if (subId === 'punch') return [`VIEW_${modUpper}`, 'VIEW_GPS_SELFIE_PUNCH', 'CREATE_GPS_SELFIE_PUNCH'];
+        if (subId === 'roster') return ['VIEW_SHIFT_ROSTER', 'UPDATE_SHIFT_ROSTER'];
+        if (subId === 'regularize') return [`VIEW_${modUpper}`, 'VIEW_ATTENDANCE_REGULARIZATION', 'CREATE_ATTENDANCE_REGULARIZATION', 'UPDATE_ATTENDANCE_REGULARIZATION'];
+        if (subId === 'muster') return [`VIEW_${modUpper}`, 'VIEW_MUSTER_ROLL'];
+        if (subId === 'reports') return ['VIEW_ATTENDANCE_REPORTS', 'UPDATE_SHIFT_ROSTER'];
+        if (subId === 'geofence') return ['UPDATE_SHIFT_ROSTER', 'UPDATE_ATTENDANCE'];
+        break;
+      case 'leave':
+        if (subId === 'apply') return [`VIEW_${modUpper}`, 'CREATE_LEAVE_APPLICATION'];
+        if (subId === 'approvals') return ['UPDATE_LEAVE_APPROVAL'];
+        if (subId === 'calendar') return [`VIEW_${modUpper}`, 'VIEW_LEAVE_CALENDAR'];
+        if (subId === 'policies') return [`VIEW_${modUpper}`, 'VIEW_LEAVE_POLICIES'];
+        if (subId === 'admin') return ['UPDATE_LEAVE_POLICIES', 'UPDATE_LEAVE'];
+        break;
+      case 'payroll':
+        if (subId === 'process') return ['UPDATE_SALARY_PROCESSING'];
+        if (subId === 'revisions') return ['UPDATE_SALARY_STRUCTURE'];
+        if (subId === 'loans') return [`VIEW_${modUpper}`, 'VIEW_LOANS_ADVANCES', 'CREATE_LOANS_ADVANCES', 'UPDATE_LOANS_ADVANCES'];
+        if (subId === 'investment') return [`VIEW_${modUpper}`, 'VIEW_INVESTMENT_DECLARATIONS', 'CREATE_INVESTMENT_DECLARATIONS'];
+        if (subId === 'payslips') return [`VIEW_${modUpper}`, 'VIEW_PAYSLIP_TEMPLATES'];
+        if (subId === 'reports') return ['VIEW_PAYROLL_REPORTS'];
+        break;
+      case 'performance':
+        if (subId === 'goals') return [`VIEW_${modUpper}`, 'VIEW_KRA_GOALS', 'CREATE_KRA_GOALS'];
+        if (subId === 'feedback') return [`VIEW_${modUpper}`, 'VIEW_FEEDBACK_360', 'CREATE_FEEDBACK_360'];
+        if (subId === 'bellcurve') return ['VIEW_BELLCURVE_ANALYTICS', 'UPDATE_KRA_GOALS'];
+        break;
+      case 'engagement':
+        if (subId === 'feed') return [`VIEW_${modUpper}`, 'VIEW_SOCIAL_FEED', 'CREATE_SOCIAL_POST'];
+        if (subId === 'mood') return [`VIEW_${modUpper}`, 'VIEW_MOOD_ANALYSIS'];
+        if (subId === 'surveys') return [`VIEW_${modUpper}`, 'VIEW_SURVEYS', 'CREATE_SURVEYS'];
+        break;
+      case 'claims':
+        if (subId === 'apply-claim') return [`VIEW_${modUpper}`, 'CREATE_TRAVEL_REQUEST'];
+        if (subId === 'my-claims') return [`VIEW_${modUpper}`, 'VIEW_EXPENSE_REIMBURSEMENT', 'CREATE_EXPENSE_REIMBURSEMENT'];
+        if (subId === 'approvals') return ['UPDATE_CLAIM_APPROVAL'];
+        break;
+      case 'timesheets':
+        if (subId === 'entry') return [`VIEW_${modUpper}`, 'VIEW_TIMESHEET_ENTRY', 'CREATE_TIMESHEET_ENTRY'];
+        if (subId === 'projects') return ['VIEW_CLIENTS_PROJECTS', 'UPDATE_CLIENTS_PROJECTS'];
+        break;
+      case 'recruitment':
+        if (subId === 'jobs') return [`VIEW_${modUpper}`, 'VIEW_JOB_REQUISITIONS', 'CREATE_JOB_REQUISITIONS'];
+        if (subId === 'candidates') return [`VIEW_${modUpper}`, 'VIEW_CANDIDATE_PIPELINE', 'UPDATE_CANDIDATE_PIPELINE'];
+        if (subId === 'onboarding') return [`VIEW_${modUpper}`, 'VIEW_PRE_ONBOARDING', 'UPDATE_PRE_ONBOARDING'];
+        break;
+      case 'documents':
+        if (subId === 'vault') return ['VIEW_DOCUMENT_VAULT', 'CREATE_DOCUMENT_VAULT'];
+        break;
+      case 'assets':
+        if (subId === 'register') return ['VIEW_ASSET_MANAGEMENT', 'UPDATE_ASSET_MANAGEMENT'];
+        break;
+      case 'letters':
+        if (subId === 'generate') return ['VIEW_LETTER_GENERATOR', 'CREATE_LETTER_GENERATOR'];
+        break;
+      case 'helpdesk':
+        if (subId === 'tickets') return ['VIEW_HR_HELPDESK_TICKETS', 'CREATE_HR_HELPDESK_TICKET'];
+        break;
+    }
+    return [`VIEW_${modUpper}`];
+  };
+
+  const allMenuItems: MenuItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { 
       id: 'employees', 
       label: 'Employee Center', 
       icon: Users,
-      subItems: isAdmin ? [
+      subItems: [
         { id: 'directory', label: 'Employee Directory' },
         { id: 'master', label: 'Employee Master' },
         { id: 'idcard', label: 'ID Card Generator' },
@@ -56,10 +138,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
         { id: 'bulk', label: 'Bulk Imports & Exports' },
         { id: 'roles', label: 'Role & Permissions' },
         { id: 'departments', label: 'Departments' }
-      ] : [
-        { id: 'directory', label: 'Employee Directory' },
-        { id: 'idcard', label: 'ID Card Generator' },
-        { id: 'orgchart', label: 'Organization Chart' },
       ]
     },
     { 
@@ -156,9 +234,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
     { id: 'subscription', label: 'Subscription & Plans', icon: CreditCard }
   ];
 
+  const hasModuleAccess = (item: MenuItem): boolean => {
+    if (item.id === 'dashboard') return true;
+    if (item.id === 'subscription') return isAdmin;
+    if (isAdmin) return true;
+    const modUpper = item.id.toUpperCase();
+    if (userPerms.includes(`VIEW_${modUpper}`) || userPerms.some(p => p.includes(modUpper))) {
+      return true;
+    }
+    if (item.subItems) {
+      return item.subItems.some(sub => {
+        const reqs = getSubItemPermissions(item.id, sub.id);
+        return reqs.some(r => userPerms.includes(r));
+      });
+    }
+    return false;
+  };
+
+  const visibleMenuItems: MenuItem[] = allMenuItems
+    .filter(hasModuleAccess)
+    .map(item => {
+      if (!item.subItems) return item;
+      return {
+        ...item,
+        subItems: item.subItems.filter(sub => {
+          if (isAdmin) return true;
+          const reqs = getSubItemPermissions(item.id, sub.id);
+          return reqs.some(r => userPerms.includes(r));
+        })
+      };
+    })
+    .filter(item => item.id === 'dashboard' || !item.subItems || item.subItems.length > 0);
+
   const handleModuleClick = (item: MenuItem) => {
     setActiveModule(item.id);
-    if (item.subItems) {
+    if (item.subItems && item.subItems.length > 0) {
       setOpenDropdown(openDropdown === item.id ? null : item.id);
       setActiveSubModule(item.subItems[0].id);
     } else {
@@ -230,104 +340,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
 
         {/* Navigation List */}
         <nav className="flex-1 overflow-y-auto py-4 space-y-1.5 px-3">
-          {(() => {
-            const { currentUser } = useApp();
-            const userPerms = currentUser?.permissions || [];
-            const isSuperAdmin = currentUser?.role === 'Super Admin';
-
-            const getSubItemPermission = (moduleId: string, subId: string): string => {
-              if (moduleId === 'employees') {
-                if (subId === 'directory') return 'VIEW_EMPLOYEE_DIRECTORY';
-                if (subId === 'master') return 'VIEW_EMPLOYEE_MASTER';
-                if (subId === 'orgchart') return 'VIEW_ORGANIZATION_CHART';
-                if (subId === 'exit') return 'VIEW_EXIT_SETTLEMENT';
-                if (subId === 'resignation') return 'VIEW_EXIT_SETTLEMENT';
-                if (subId === 'bulk') return 'MANAGE_BULK_IMPORTS';
-                if (subId === 'roles') return 'VIEW_ROLES_PERMISSIONS';
-                if (subId === 'departments') return 'VIEW_DEPARTMENTS';
-              }
-              if (moduleId === 'attendance') {
-                if (subId === 'punch') return 'VIEW_GPS_SELFIE_PUNCH';
-                if (subId === 'roster') return 'VIEW_SHIFT_ROSTER';
-                if (subId === 'regularize') return 'VIEW_ATTENDANCE_REGULARIZATION';
-                if (subId === 'muster') return 'VIEW_MUSTER_ROLL';
-                if (subId === 'reports') return 'VIEW_ATTENDANCE_REPORTS';
-                if (subId === 'geofence') return 'UPDATE_SHIFT_ROSTER';
-              }
-              if (moduleId === 'leave') {
-                if (subId === 'apply') return 'CREATE_LEAVE_APPLICATION';
-                if (subId === 'approvals') return 'UPDATE_LEAVE_APPROVAL';
-                if (subId === 'calendar') return 'VIEW_LEAVE_CALENDAR';
-                if (subId === 'policies') return 'VIEW_LEAVE_POLICIES';
-              }
-              if (moduleId === 'payroll') {
-                if (subId === 'process') return 'UPDATE_SALARY_PROCESSING';
-                if (subId === 'revisions') return 'UPDATE_SALARY_STRUCTURE';
-                if (subId === 'loans') return 'VIEW_LOANS_ADVANCES';
-                if (subId === 'investment') return 'VIEW_INVESTMENT_DECLARATIONS';
-                if (subId === 'payslips') return 'VIEW_PAYSLIP_TEMPLATES';
-                if (subId === 'reports') return 'VIEW_PAYROLL_REPORTS';
-              }
-              if (moduleId === 'performance') {
-                if (subId === 'goals') return 'VIEW_KRA_GOALS';
-                if (subId === 'feedback') return 'VIEW_FEEDBACK_360';
-                if (subId === 'bellcurve') return 'VIEW_BELLCURVE_ANALYTICS';
-              }
-              if (moduleId === 'engagement') {
-                if (subId === 'feed') return 'VIEW_SOCIAL_FEED';
-                if (subId === 'mood') return 'VIEW_MOOD_ANALYSIS';
-                if (subId === 'surveys') return 'VIEW_SURVEYS';
-              }
-              if (moduleId === 'claims') {
-                if (subId === 'apply-claim') return 'CREATE_TRAVEL_REQUEST';
-                if (subId === 'my-claims') return 'VIEW_EXPENSE_REIMBURSEMENT';
-                if (subId === 'approvals') return 'UPDATE_CLAIM_APPROVAL';
-              }
-              if (moduleId === 'timesheets') {
-                if (subId === 'entry') return 'VIEW_TIMESHEET_ENTRY';
-                if (subId === 'projects') return 'VIEW_CLIENTS_PROJECTS';
-              }
-              if (moduleId === 'recruitment') {
-                if (subId === 'jobs') return 'VIEW_JOB_REQUISITIONS';
-                if (subId === 'candidates') return 'VIEW_CANDIDATE_PIPELINE';
-                if (subId === 'onboarding') return 'VIEW_PRE_ONBOARDING';
-              }
-              if (moduleId === 'documents') {
-                if (subId === 'vault') return 'VIEW_DOCUMENT_VAULT';
-              }
-              if (moduleId === 'assets') {
-                if (subId === 'register') return 'VIEW_ASSET_MANAGEMENT';
-              }
-              if (moduleId === 'letters') {
-                if (subId === 'generate') return 'VIEW_LETTER_GENERATOR';
-              }
-              if (moduleId === 'helpdesk') {
-                if (subId === 'tickets') return 'VIEW_HR_HELPDESK_TICKETS';
-              }
-              return `VIEW_${moduleId.toUpperCase()}`;
-            };
-
-            const visibleMenuItems = menuItems
-              .filter(item => {
-                if (item.id === 'dashboard') return true;
-                if (isSuperAdmin) return true;
-                const requiredPermission = `VIEW_${item.id.toUpperCase()}`;
-                return userPerms.includes(requiredPermission);
-              })
-              .map(item => {
-                if (!item.subItems) return item;
-                return {
-                  ...item,
-                  subItems: item.subItems.filter(sub => {
-                    if (isSuperAdmin) return true;
-                    const reqPerm = getSubItemPermission(item.id, sub.id);
-                    return userPerms.includes(reqPerm);
-                  })
-                };
-              })
-              .filter(item => item.id === 'dashboard' || !item.subItems || item.subItems.length > 0);
-
-            return visibleMenuItems.map((item) => {
+          {visibleMenuItems.map((item) => {
             const Icon = item.icon;
             const isSelected = activeModule === item.id;
             const isDropdownOpen = openDropdown === item.id || (isSelected && openDropdown === null);
@@ -381,8 +394,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen = false, setMobileO
                 )}
               </div>
             );
-          });
-        })()}
+          })}
         </nav>
 
         {/* Footer Info */}

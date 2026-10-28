@@ -8,7 +8,6 @@ import {
   Send,
   Smile,
   Users,
-  Award,
   Calendar,
   Sparkles
 } from 'lucide-react';

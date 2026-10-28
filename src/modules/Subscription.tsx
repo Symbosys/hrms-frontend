@@ -24,7 +24,7 @@ export const Subscription: React.FC = () => {
   const { showAlert, showConfirm } = useApp();
   const [selectedPlan, setSelectedPlan] = useState<string>('pro');
 
-  const { data: plansResponse, isLoading: isPlansLoading } = useSubscriptionPlans();
+  const { data: plansResponse } = useSubscriptionPlans();
   const { data: compareResponse } = useSubscriptionComparisons();
   const subscribeMutation = useSubscribePlan();
 
@@ -246,8 +246,10 @@ export const Subscription: React.FC = () => {
               key={plan.id}
               onClick={() => setSelectedPlan(plan.id)}
               className={`relative rounded-3xl p-6 sm:p-7 transition-all duration-300 transform hover:-translate-y-2.5 hover:scale-[1.02] cursor-pointer flex flex-col justify-between ${
-                plan.popular
-                  ? 'bg-gradient-to-b from-white via-indigo-50/40 to-white dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border-2 border-indigo-500 shadow-2xl shadow-indigo-500/20 ring-2 ring-indigo-500/20'
+                isSelected
+                  ? 'bg-gradient-to-b from-white via-indigo-50/40 to-white dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border-2 border-indigo-500 shadow-2xl shadow-indigo-500/20 ring-2 ring-indigo-500/30'
+                  : plan.popular
+                  ? 'bg-gradient-to-b from-white via-indigo-50/40 to-white dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border-2 border-indigo-500/60 shadow-xl'
                   : 'bg-gradient-to-b from-white to-slate-50/60 dark:from-slate-900 dark:to-slate-950/80 border border-slate-200/80 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-500 shadow-md hover:shadow-2xl hover:shadow-indigo-500/10'
               }`}
             >

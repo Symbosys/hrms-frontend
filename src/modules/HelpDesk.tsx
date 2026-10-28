@@ -60,7 +60,7 @@ export const HelpDesk: React.FC = () => {
           category: tktCategory,
           priority: tktPriority,
         }, {
-          onSuccess: (res: any) => {
+          onSuccess: () => {
             addAuditLog("Logged Support Ticket", "Help Desk Center", `Raised support ticket: "${tktSubject}"`);
             showAlert(`Support ticket created successfully! IT/HR team has been notified.`, "Ticket Logged", "success");
             setTktSubject('');

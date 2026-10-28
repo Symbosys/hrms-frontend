@@ -3,9 +3,7 @@ import {
   Download,
   Key,
   Monitor,
-  Printer,
   Smartphone,
-  Info,
   UserCheck
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -14,7 +12,6 @@ import {
   useAssets,
   useCreateAsset,
   useAssignAsset,
-  AssetRecord
 } from '../api/hook/useAssets';
 
 export const Assets: React.FC = () => {
@@ -61,7 +58,7 @@ export const Assets: React.FC = () => {
           category: newCategory,
           serial: newSerial || `SR-${Math.floor(Math.random() * 1000000)}`,
         }, {
-          onSuccess: (res: any) => {
+          onSuccess: () => {
             addAuditLog("Added Asset", "Asset Tracking", `Registered new asset in stock: ${newName}`);
             showAlert(`Asset "${newName}" added to inventory stock list!`, "Asset Registered", "success");
             setNewName('');

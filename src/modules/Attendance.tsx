@@ -173,6 +173,31 @@ export const Attendance: React.FC = () => {
   const { data: profileRes } = useProfile();
   const loggedUser = profileRes?.data?.user;
 
+  const roleStr = (userRole || loggedUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || loggedUser?.role === 'SUPER_ADMIN' || loggedUser?.role === 'HR_ADMIN' || loggedUser?.role === 'Super Admin' || loggedUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || loggedUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+
+  const userPerms: string[] = (loggedUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const hasPerm = (required: string | string[]) => {
+    if (isAdmin) return true;
+    if (Array.isArray(required)) {
+      return required.some(p => userPerms.includes(p));
+    }
+    return userPerms.includes(required);
+  };
+
+  // Auto redirect employees away from restricted submodules
+  useEffect(() => {
+    if (activeSubModule === 'roster' && !hasPerm(['VIEW_SHIFT_ROSTER', 'UPDATE_SHIFT_ROSTER'])) {
+      setActiveSubModule('punch');
+    } else if (activeSubModule === 'reports' && !hasPerm(['VIEW_ATTENDANCE_REPORTS', 'UPDATE_SHIFT_ROSTER'])) {
+      setActiveSubModule('punch');
+    } else if (activeSubModule === 'geofence' && !hasPerm(['UPDATE_SHIFT_ROSTER', 'UPDATE_ATTENDANCE'])) {
+      setActiveSubModule('punch');
+    }
+  }, [activeSubModule, setActiveSubModule, userPerms, isAdmin]);
+
   // Active employee switcher
   const [selectedEmpId, setSelectedEmpId] = useState('');
 
@@ -195,15 +220,14 @@ export const Attendance: React.FC = () => {
 
   // Automatically select logged in user's employee record
   useEffect(() => {
-    const isAdminOrHR = userRole === 'Super Admin' || userRole === 'HR Admin';
     if (myEmpId) {
-      if (!selectedEmpId || (!isAdminOrHR && selectedEmpId !== myEmpId)) {
+      if (!selectedEmpId || (!isAdmin && !isManager && selectedEmpId !== myEmpId)) {
         setSelectedEmpId(myEmpId);
       }
     } else if (!selectedEmpId && profileRes && employeesList.length > 0) {
       setSelectedEmpId(employeesList[0].id);
     }
-  }, [employeesList, loggedUser, myEmpId, profileRes, selectedEmpId, userRole]);
+  }, [employeesList, loggedUser, myEmpId, profileRes, selectedEmpId, isAdmin, isManager]);
 
   const activeEmployee = employeesList.find(emp => emp.id === selectedEmpId) || myEmployee;
 
@@ -1296,16 +1320,18 @@ export const Attendance: React.FC = () => {
         >
           GPS / Selfie Punch
         </button>
-        <button 
-          onClick={() => setActiveSubModule('roster')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'roster' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Shift & Roster Planning
-        </button>
+        {(isAdmin || isManager || hasPerm(['VIEW_SHIFT_ROSTER', 'UPDATE_SHIFT_ROSTER'])) && (
+          <button 
+            onClick={() => setActiveSubModule('roster')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'roster' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Shift & Roster Planning
+          </button>
+        )}
         <button 
           onClick={() => setActiveSubModule('regularize')}
           className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
@@ -1324,66 +1350,93 @@ export const Attendance: React.FC = () => {
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          Muster Roll Calendar
+          {isEmployee ? 'My Attendance Calendar' : 'Muster Roll Calendar'}
         </button>
-        <button 
-          onClick={() => setActiveSubModule('reports')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'reports' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Attendance Reports
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('geofence')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'geofence' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Geofencing Config
-        </button>
-      </div>
-
-      {/* Global Simulated User Switcher */}
-      <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-rose-100 dark:bg-rose-950/40 text-rose-600 rounded-xl">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <h4 className="font-bold text-slate-800 dark:text-white text-sm">Simulate as Employee</h4>
-            <p className="text-slate-450 mt-0.5">Switch profiles to change who punches check-in/out logs or files regularization requests.</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedEmpId}
-            onChange={(e) => setSelectedEmpId(e.target.value)}
-            className="px-3.5 py-2 border rounded-xl bg-white dark:bg-slate-900 text-slate-750 dark:text-slate-300 font-semibold focus:outline-none"
+        {(isAdmin || isManager || hasPerm(['VIEW_ATTENDANCE_REPORTS', 'UPDATE_SHIFT_ROSTER'])) && (
+          <button 
+            onClick={() => setActiveSubModule('reports')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'reports' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
           >
-            {employeesLoading ? (
-              <option>Loading employees...</option>
-            ) : (
-              employeesList.map(emp => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name} ({emp.designation || 'Staff'})
-                </option>
-              ))
-            )}
-          </select>
-
-          {activeEmployee && (
-            <span className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-355 rounded-xl font-bold uppercase text-[10px]">
-              {activeEmployee.department?.name || 'Operations'}
-            </span>
-          )}
-        </div>
+            Attendance Reports
+          </button>
+        )}
+        {(isAdmin || hasPerm(['UPDATE_SHIFT_ROSTER', 'UPDATE_ATTENDANCE'])) && (
+          <button 
+            onClick={() => setActiveSubModule('geofence')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'geofence' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Geofencing Config
+          </button>
+        )}
       </div>
+
+      {/* Employee / Session Status Header */}
+      {!isEmployee ? (
+        <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-rose-100 dark:bg-rose-950/40 text-rose-600 rounded-xl">
+              <Users className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-slate-800 dark:text-white text-sm">Simulate as Employee</h4>
+              <p className="text-slate-450 mt-0.5">Switch profiles to change who punches check-in/out logs or files regularization requests.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedEmpId}
+              onChange={(e) => setSelectedEmpId(e.target.value)}
+              className="px-3.5 py-2 border rounded-xl bg-white dark:bg-slate-900 text-slate-750 dark:text-slate-300 font-semibold focus:outline-none"
+            >
+              {employeesLoading ? (
+                <option>Loading employees...</option>
+              ) : (
+                employeesList.map(emp => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} ({emp.designation || 'Staff'})
+                  </option>
+                ))
+              )}
+            </select>
+
+            {activeEmployee && (
+              <span className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-355 rounded-xl font-bold uppercase text-[10px]">
+                {activeEmployee.department?.name || 'Operations'}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-primary/5 dark:bg-primary/10 p-4 rounded-2xl border border-primary/20 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-primary/20 text-primary rounded-xl">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-slate-900 dark:text-white text-sm">
+                Self-Service Attendance Portal: <span className="text-primary">{activeEmployee?.name || 'My Profile'}</span>
+              </h4>
+              <p className="text-slate-500 dark:text-slate-400 mt-0.5">
+                Employee ID: <span className="font-mono font-semibold">{activeEmployee?.id || myEmpId}</span> • Department: <span className="font-semibold">{activeEmployee?.department?.name || 'Engineering'}</span>
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 rounded-xl font-bold uppercase text-[10px]">
+              Assigned Shift: {currentAssignedShiftDetail.name} ({currentAssignedShiftDetail.startTime} - {currentAssignedShiftDetail.endTime})
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ======================================= */}
       {/* 1. GPS / SELFIE PUNCH SIMULATOR         */}

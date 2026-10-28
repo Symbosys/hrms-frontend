@@ -29,7 +29,29 @@ export const Leave: React.FC = () => {
     activeSubModule, setActiveSubModule, addAuditLog, userRole, currentUser, showConfirm, showAlert 
   } = useApp();
 
-  const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin';
+  const roleStr = (userRole || currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || currentUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+  void isEmployee;
+
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const hasPerm = (required: string | string[]) => {
+    if (isAdmin) return true;
+    if (Array.isArray(required)) {
+      return required.some(p => userPerms.includes(p));
+    }
+    return userPerms.includes(required);
+  };
+
+  // Auto redirect employees away from approvals or admin configuration
+  useEffect(() => {
+    if (activeSubModule === 'approvals' && !hasPerm('UPDATE_LEAVE_APPROVAL')) {
+      setActiveSubModule('apply');
+    } else if (activeSubModule === 'admin' && !hasPerm(['UPDATE_LEAVE_POLICIES', 'UPDATE_LEAVE'])) {
+      setActiveSubModule('apply');
+    }
+  }, [activeSubModule, setActiveSubModule, userPerms, isAdmin]);
 
   // Leave Form States
   const [selectedLeaveTypeId, setSelectedLeaveTypeId] = useState('');
@@ -428,16 +450,18 @@ export const Leave: React.FC = () => {
         >
           Apply / Balance
         </button>
-        <button 
-          onClick={() => setActiveSubModule('approvals')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'approvals' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Leave Approvals console
-        </button>
+        {(isAdmin || isManager || hasPerm('UPDATE_LEAVE_APPROVAL')) && (
+          <button 
+            onClick={() => setActiveSubModule('approvals')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'approvals' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Leave Approvals console
+          </button>
+        )}
         <button 
           onClick={() => setActiveSubModule('calendar')}
           className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
@@ -458,7 +482,7 @@ export const Leave: React.FC = () => {
         >
           Leave Policies
         </button>
-        {isAdmin && (
+        {(isAdmin || hasPerm(['UPDATE_LEAVE_POLICIES', 'UPDATE_LEAVE'])) && (
           <button 
             onClick={() => setActiveSubModule('admin')}
             className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
@@ -993,7 +1017,7 @@ export const Leave: React.FC = () => {
         {/* ======================================= */}
       {/* 5. LEAVE CONFIGURATIONS (ADMIN ONLY)     */}
       {/* ======================================= */}
-      {activeSubModule === 'admin' && isAdmin && (
+      {activeSubModule === 'admin' && (isAdmin || hasPerm(['UPDATE_LEAVE_POLICIES', 'UPDATE_LEAVE'])) && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in text-xs">
           
           {/* Create/Edit Configuration Form */}

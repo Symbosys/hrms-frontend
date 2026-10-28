@@ -29,8 +29,31 @@ import {
 import { useApp } from '../context/AppContext';
 
 export const Payroll: React.FC = () => {
-  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, showConfirm, showAlert, companyName, setCompanyName } = useApp();
-  const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin';
+  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, currentUser, showConfirm, showAlert, companyName, setCompanyName } = useApp();
+  const roleStr = (userRole || currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || currentUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const hasPerm = (required: string | string[]) => {
+    if (isAdmin) return true;
+    if (Array.isArray(required)) {
+      return required.some(p => userPerms.includes(p));
+    }
+    return userPerms.includes(required);
+  };
+
+  // Auto redirect employees away from administrative payroll cycles
+  useEffect(() => {
+    if (activeSubModule === 'process' && !hasPerm('UPDATE_SALARY_PROCESSING')) {
+      setActiveSubModule('payslips');
+    } else if (activeSubModule === 'reports' && !hasPerm('VIEW_PAYROLL_REPORTS')) {
+      setActiveSubModule('payslips');
+    } else if (activeSubModule === 'revisions' && !hasPerm('UPDATE_SALARY_STRUCTURE')) {
+      setActiveSubModule('payslips');
+    }
+  }, [activeSubModule, setActiveSubModule, userPerms, isAdmin]);
 
 
   // State Variables
@@ -77,11 +100,11 @@ export const Payroll: React.FC = () => {
   const [declaredHra, setDeclaredHra] = useState(180000);
 
   // 1. Fetch live employees
-  const { data: dbEmployeesRes, isLoading: loadingEmployees } = useEmployees();
+  const { data: dbEmployeesRes } = useEmployees();
   const dbEmployees = dbEmployeesRes?.data || [];
 
   // 2. Fetch current payroll cycle
-  const { data: cycleDetailsRes, isLoading: loadingCycle } = usePayrollCycle(reportMonth, Number(reportYear));
+  const { data: cycleDetailsRes } = usePayrollCycle(reportMonth, Number(reportYear));
   const cycleDetails = cycleDetailsRes?.data;
   const currentCycle = cycleDetails?.cycle;
   const runs = cycleDetails?.runs || [];
@@ -99,10 +122,22 @@ export const Payroll: React.FC = () => {
 
   // Initialize selectedEmpId on employees load
   useEffect(() => {
-    if (dbEmployees.length > 0 && !selectedEmpId) {
-      setSelectedEmpId(dbEmployees[0].id);
+    if (dbEmployees.length > 0) {
+      if (isEmployee && currentUser) {
+        const myEmp = dbEmployees.find(e => 
+          (currentUser.id && e.id === currentUser.id) ||
+          (currentUser.email && e.email?.toLowerCase() === currentUser.email?.toLowerCase())
+        );
+        if (myEmp) {
+          setSelectedEmpId(myEmp.id);
+          return;
+        }
+      }
+      if (!selectedEmpId) {
+        setSelectedEmpId(dbEmployees[0].id);
+      }
     }
-  }, [dbEmployees, selectedEmpId]);
+  }, [dbEmployees, selectedEmpId, isEmployee, currentUser]);
 
   // Sync tax declarations inputs when selection fetches new declarations
   useEffect(() => {
@@ -385,15 +420,27 @@ export const Payroll: React.FC = () => {
       
       {/* Sub-tab Navigation */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto whitespace-nowrap scrollbar-none">
+        {(isAdmin || hasPerm('UPDATE_SALARY_PROCESSING')) && (
+          <button 
+            onClick={() => setActiveSubModule('process')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'process' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Salary Processing Cycle
+          </button>
+        )}
         <button 
-          onClick={() => setActiveSubModule('process')}
+          onClick={() => setActiveSubModule('payslips')}
           className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'process' 
+            activeSubModule === 'payslips' 
               ? 'border-primary text-primary' 
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          Salary Processing Cycle
+          {isEmployee ? 'My Payslips' : 'Payslips & Templates'}
         </button>
         <button 
           onClick={() => setActiveSubModule('loans')}
@@ -403,7 +450,7 @@ export const Payroll: React.FC = () => {
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          Loans & Advances Ledger
+          {isEmployee ? 'My Loans & Advances' : 'Loans & Advances Ledger'}
         </button>
         <button 
           onClick={() => setActiveSubModule('investment')}
@@ -415,36 +462,30 @@ export const Payroll: React.FC = () => {
         >
           Investment Declaration
         </button>
-        <button 
-          onClick={() => setActiveSubModule('payslips')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'payslips' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Payslip & Templates
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('reports')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'reports' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Payroll Reports & ECR
-        </button>
-        <button 
-          onClick={() => setActiveSubModule('revisions')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'revisions' 
-              ? 'border-primary text-primary font-bold' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Salary Structure & Revisions
-        </button>
+        {(isAdmin || isManager || hasPerm('VIEW_PAYROLL_REPORTS')) && (
+          <button 
+            onClick={() => setActiveSubModule('reports')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'reports' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Payroll Reports & ECR
+          </button>
+        )}
+        {(isAdmin || hasPerm('UPDATE_SALARY_STRUCTURE')) && (
+          <button 
+            onClick={() => setActiveSubModule('revisions')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'revisions' 
+                ? 'border-primary text-primary font-bold' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Salary Structure & Revisions
+          </button>
+        )}
       </div>
 
       {/* ======================================= */}

@@ -17,7 +17,27 @@ import {
 import { useApp } from '../context/AppContext';
 
 export const TravelClaims: React.FC = () => {
-  const { activeSubModule, setActiveSubModule, addAuditLog, showConfirm, showAlert } = useApp();
+  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, currentUser, showConfirm, showAlert } = useApp();
+  const roleStr = (userRole || currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || currentUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const hasPerm = (required: string | string[]) => {
+    if (isAdmin) return true;
+    if (Array.isArray(required)) {
+      return required.some(p => userPerms.includes(p));
+    }
+    return userPerms.includes(required);
+  };
+
+  // Auto redirect employees away from approvals
+  useEffect(() => {
+    if (activeSubModule === 'approvals' && !isAdmin && !isManager && !hasPerm('UPDATE_CLAIM_APPROVAL')) {
+      setActiveSubModule('apply-claim');
+    }
+  }, [isAdmin, isManager, userPerms, activeSubModule, setActiveSubModule]);
 
   // Active employee context (for simulation)
   const [selectedEmpId, setSelectedEmpId] = useState('');
@@ -26,12 +46,24 @@ export const TravelClaims: React.FC = () => {
   const { data: dbEmployeesRes, isLoading: employeesLoading } = useEmployees();
   const employeesList = dbEmployeesRes?.data || [];
 
-  // Automatically select first employee as current user
+  // Automatically select logged in employee as current user
   useEffect(() => {
-    if (employeesList.length > 0 && !selectedEmpId) {
-      setSelectedEmpId(employeesList[0].id);
+    if (employeesList.length > 0) {
+      if (isEmployee && currentUser) {
+        const myEmp = employeesList.find(e => 
+          (currentUser.id && e.id === currentUser.id) ||
+          (currentUser.email && e.email?.toLowerCase() === currentUser.email?.toLowerCase())
+        );
+        if (myEmp) {
+          setSelectedEmpId(myEmp.id);
+          return;
+        }
+      }
+      if (!selectedEmpId) {
+        setSelectedEmpId(employeesList[0].id);
+      }
     }
-  }, [employeesList, selectedEmpId]);
+  }, [employeesList, selectedEmpId, isEmployee, currentUser]);
 
   const activeEmployee = employeesList.find(emp => emp.id === selectedEmpId);
 
@@ -42,6 +74,7 @@ export const TravelClaims: React.FC = () => {
                      activeEmployee?.designation?.toUpperCase().includes('LEAD') || 
                      activeEmployee?.designation?.toUpperCase().includes('DIRECTOR') ||
                      activeEmployee?.designation?.toUpperCase().includes('HEAD');
+  void isApprover;
 
   // Queries
   const { data: claimsRes, isLoading: claimsLoading } = useClaims(
@@ -88,7 +121,7 @@ export const TravelClaims: React.FC = () => {
           reason,
           receiptUrl: receiptFile ? receiptFile.name : null,
         }, {
-          onSuccess: (res: any) => {
+          onSuccess: () => {
             addAuditLog("Applied Claim", "Travel & Claims", `${activeEmployee.name} submitted expense claim of ₹${amount} for ${reason}`);
             showAlert(`Expense claim submitted successfully!`, "Claim Submitted", "success");
             
@@ -173,16 +206,18 @@ export const TravelClaims: React.FC = () => {
         >
           My Reimbursements
         </button>
-        <button 
-          onClick={() => setActiveSubModule('approvals')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'approvals' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Claim Approvals
-        </button>
+        {(isAdmin || isManager || hasPerm('UPDATE_CLAIM_APPROVAL')) && (
+          <button 
+            onClick={() => setActiveSubModule('approvals')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'approvals' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Claim Approvals
+          </button>
+        )}
       </div>
 
       {/* Global Simulated User Switcher */}

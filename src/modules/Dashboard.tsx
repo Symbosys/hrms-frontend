@@ -343,7 +343,7 @@ export const Dashboard: React.FC = () => {
                     }}
                   />
                   <Bar dataKey="value" name="Headcount" fill="#3b82f6" radius={[8, 8, 0, 0]}>
-                    {deptData.map((entry, index) => (
+                    {deptData.map((_entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Bar>

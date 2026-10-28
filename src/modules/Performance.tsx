@@ -21,8 +21,29 @@ import {
 import { useApp } from '../context/AppContext';
 
 export const Performance: React.FC = () => {
-  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, showConfirm, showAlert } = useApp();
-  const isAdminOrManager = userRole === 'Super Admin' || userRole === 'HR Admin' || userRole === 'Manager';
+  const { activeSubModule, setActiveSubModule, addAuditLog, userRole, currentUser, showConfirm, showAlert } = useApp();
+  const roleStr = (userRole || currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || currentUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+  void isEmployee;
+
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const hasPerm = (required: string | string[]) => {
+    if (isAdmin) return true;
+    if (Array.isArray(required)) {
+      return required.some(p => userPerms.includes(p));
+    }
+    return userPerms.includes(required);
+  };
+  const isAdminOrManager = isAdmin || isManager || hasPerm(['UPDATE_KRA_GOALS', 'VIEW_BELLCURVE_ANALYTICS']);
+
+  // Auto redirect employees away from bell curve analytics
+  useEffect(() => {
+    if (activeSubModule === 'bellcurve' && !isAdmin && !isManager && !hasPerm('VIEW_BELLCURVE_ANALYTICS')) {
+      setActiveSubModule('goals');
+    }
+  }, [isAdmin, isManager, userPerms, activeSubModule, setActiveSubModule]);
 
   // Active filters and selectors
   const [selectedEmpId, setSelectedEmpId] = useState('');
@@ -199,16 +220,18 @@ export const Performance: React.FC = () => {
         >
           360° Feedback
         </button>
-        <button 
-          onClick={() => setActiveSubModule('bellcurve')}
-          className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-            activeSubModule === 'bellcurve' 
-              ? 'border-primary text-primary' 
-              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-          }`}
-        >
-          Bell Curve Analytics
-        </button>
+        {(isAdmin || isManager || hasPerm('VIEW_BELLCURVE_ANALYTICS')) && (
+          <button 
+            onClick={() => setActiveSubModule('bellcurve')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'bellcurve' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Bell Curve Analytics
+          </button>
+        )}
       </div>
 
       {/* Global Employee Switcher (hidden in Bell Curve tab) */}

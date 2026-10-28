@@ -33,10 +33,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
     theme, setTheme, 
     language, setLanguage, 
     userRole, setUserRole, 
-    setActiveModule, setActiveSubModule, setSelectedEmployeeId,
+    activeModule, setActiveModule, activeSubModule, setActiveSubModule, setSelectedEmployeeId,
     notifications, markAllNotificationsRead, clearNotification,
     globalSearch, setGlobalSearch,
-    employees, assets, claims, leaveRequests, tickets,
+    employees, assets, claims,
     currentUser, setCurrentUser, logout, showAlert
   } = useApp();
 
@@ -93,6 +93,26 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
   const handleRoleChange = (role: UserRole) => {
     setUserRole(role);
     setShowProfile(false);
+    if (role === 'Employee') {
+      if (['recruitment', 'subscription'].includes(activeModule)) {
+        setActiveModule('dashboard');
+        setActiveSubModule('dashboard');
+      } else if (activeModule === 'attendance' && ['roster', 'reports', 'geofence'].includes(activeSubModule)) {
+        setActiveSubModule('punch');
+      } else if (activeModule === 'leave' && ['approvals', 'admin'].includes(activeSubModule)) {
+        setActiveSubModule('apply');
+      } else if (activeModule === 'payroll' && ['process', 'reports', 'revisions'].includes(activeSubModule)) {
+        setActiveSubModule('payslips');
+      } else if (activeModule === 'claims' && activeSubModule === 'approvals') {
+        setActiveSubModule('apply-claim');
+      } else if (activeModule === 'timesheets' && activeSubModule === 'projects') {
+        setActiveSubModule('entry');
+      } else if (activeModule === 'performance' && activeSubModule === 'bellcurve') {
+        setActiveSubModule('goals');
+      } else if (activeModule === 'employees' && ['master', 'exit', 'resignation', 'bulk', 'roles', 'departments'].includes(activeSubModule)) {
+        setActiveSubModule('directory');
+      }
+    }
     const alertMsg = `Switched to ${role} workspace view.`;
     console.log(alertMsg);
   };
@@ -585,7 +605,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
               <div className="border-t border-slate-100 dark:border-slate-800 my-1"></div>
               
               <button 
-                onClick={() => { setActiveModule('employees'); setActiveSubModule('directory'); setShowProfile(false); }}
+                onClick={() => { 
+                  const targetEmp = (employees || []).find(e => 
+                    (currentUser && (e.id === currentUser.id || e.email === currentUser.email)) ||
+                    (userRole === 'Employee' && (e.role === 'Senior UI Developer' || e.name === 'Aarav Sharma'))
+                  ) || (employees && employees[0]);
+                  if (targetEmp) {
+                    setSelectedEmployeeId(targetEmp.id);
+                  }
+                  setActiveModule('employees'); 
+                  setActiveSubModule('profile'); 
+                  setShowProfile(false); 
+                }}
                 className="w-full text-left px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-350"
               >
                 My Profile Setup

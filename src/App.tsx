@@ -32,9 +32,11 @@ const MainLayout: React.FC = () => {
     return <Login />;
   }
 
-  const isSuperAdmin = currentUser?.role === 'Super Admin';
-  const userPerms = currentUser?.permissions || [];
-  const hasAccess = activeModule === 'dashboard' || activeModule === 'idcard' || activeModule === 'subscription' || isSuperAdmin || userPerms.includes(`VIEW_${activeModule.toUpperCase()}`);
+  const roleStr = (currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const modUpper = activeModule.toUpperCase();
+  const hasAccess = activeModule === 'dashboard' || activeModule === 'idcard' || (activeModule === 'subscription' ? isAdmin : (isAdmin || userPerms.includes(`VIEW_${modUpper}`) || userPerms.some((p: string) => p.includes(modUpper))));
 
   return (
     <div className={`flex h-screen overflow-hidden ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>

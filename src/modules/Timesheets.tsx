@@ -11,17 +11,12 @@ import {
   Clock, 
   Check, 
   X, 
-  ShieldAlert, 
   Plus, 
   Briefcase, 
   UserCheck, 
-  Calendar, 
   AlertCircle, 
   Trash2, 
-  Search, 
-  CheckCircle2, 
-  Layers, 
-  Filter 
+  Search 
 } from 'lucide-react';
 
 export interface AssignedTask {
@@ -145,7 +140,7 @@ export const Timesheets: React.FC = () => {
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'High' | 'Medium' | 'Low'>('Medium');
   const [newTaskEstimatedHours, setNewTaskEstimatedHours] = useState(8);
-  const [newTaskWeek, setNewTaskWeek] = useState('Week 27 (Jul 1 - Jul 5)');
+  const [newTaskWeek] = useState('Week 27 (Jul 1 - Jul 5)');
 
   // Task Filters
   const [taskSearch, setTaskSearch] = useState('');

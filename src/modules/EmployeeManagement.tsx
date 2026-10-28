@@ -875,7 +875,37 @@ export const EmployeeManagement: React.FC = () => {
     userRole, currentUser, organizationId
   } = useApp();
 
-  const isAdmin = userRole === 'Super Admin' || userRole === 'HR Admin' || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'Super Admin';
+  const roleStr = (userRole || currentUser?.role || '').toLowerCase();
+  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_ADMIN' || currentUser?.role === 'Super Admin' || currentUser?.role === 'HR Admin';
+  const isManager = roleStr.includes('manager') || currentUser?.role === 'MANAGER';
+  const isEmployee = !isAdmin && !isManager;
+  void isEmployee;
+
+  const userPerms: string[] = (currentUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
+  const hasPerm = (required: string | string[]) => {
+    if (isAdmin) return true;
+    if (Array.isArray(required)) {
+      return required.some(p => userPerms.includes(p));
+    }
+    return userPerms.includes(required);
+  };
+
+  // Auto redirect employees away from unauthorized employee screens
+  useEffect(() => {
+    if (activeSubModule === 'master' && !hasPerm(['VIEW_EMPLOYEE_MASTER', 'UPDATE_EMPLOYEE_MASTER'])) {
+      setActiveSubModule('directory');
+    } else if (activeSubModule === 'exit' && !hasPerm(['VIEW_EXIT_SETTLEMENT', 'UPDATE_EXIT_SETTLEMENT'])) {
+      setActiveSubModule('directory');
+    } else if (activeSubModule === 'resignation' && !hasPerm(['VIEW_EXIT_SETTLEMENT', 'UPDATE_EXIT_SETTLEMENT'])) {
+      setActiveSubModule('directory');
+    } else if (activeSubModule === 'bulk' && !hasPerm('MANAGE_BULK_IMPORTS')) {
+      setActiveSubModule('directory');
+    } else if (activeSubModule === 'roles' && !hasPerm(['VIEW_ROLES_PERMISSIONS', 'UPDATE_ROLES_PERMISSIONS', 'VIEW_ADMIN'])) {
+      setActiveSubModule('directory');
+    } else if (activeSubModule === 'departments' && !hasPerm(['VIEW_DEPARTMENTS', 'UPDATE_DEPARTMENTS'])) {
+      setActiveSubModule('directory');
+    }
+  }, [activeSubModule, setActiveSubModule, userPerms, isAdmin]);
   const { data: rolesResponse } = useRoles(organizationId);
   const orgRoles = rolesResponse?.data || [];
 
@@ -1958,7 +1988,7 @@ export const EmployeeManagement: React.FC = () => {
         >
           Employee Directory
         </button>
-        {isAdmin && (
+        {hasPerm(['VIEW_EMPLOYEE_MASTER', 'UPDATE_EMPLOYEE_MASTER']) && (
           <button 
             onClick={() => setActiveSubModule('master')}
             className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
@@ -1993,64 +2023,70 @@ export const EmployeeManagement: React.FC = () => {
         >
           Organization Chart
         </button>
-        {isAdmin && (
-          <>
-            <button 
-              onClick={() => setActiveSubModule('exit')}
-              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-                activeSubModule === 'exit' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              Exit Management & F&F
-            </button>
-            <button 
-              onClick={() => setActiveSubModule('resignation')}
-              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
-                activeSubModule === 'resignation' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <span>Resignation Archive</span>
-              {resignedEmployees.length > 0 && (
-                <span className="text-[10px] bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-bold px-1.5 py-0.5 rounded-full">
-                  {resignedEmployees.length}
-                </span>
-              )}
-            </button>
-            <button 
-              onClick={() => setActiveSubModule('bulk')}
-              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-                activeSubModule === 'bulk' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              Bulk Actions & Mailing
-            </button>
-            <button 
-              onClick={() => setActiveSubModule('roles')}
-              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-                activeSubModule === 'roles' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              Role & Permissions
-            </button>
-            <button 
-              onClick={() => setActiveSubModule('departments')}
-              className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
-                activeSubModule === 'departments' 
-                  ? 'border-primary text-primary' 
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              Departments
-            </button>
-          </>
+        {hasPerm(['VIEW_EXIT_SETTLEMENT', 'UPDATE_EXIT_SETTLEMENT']) && (
+          <button 
+            onClick={() => setActiveSubModule('exit')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'exit' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Exit Management & F&F
+          </button>
+        )}
+        {hasPerm(['VIEW_EXIT_SETTLEMENT', 'UPDATE_EXIT_SETTLEMENT']) && (
+          <button 
+            onClick={() => setActiveSubModule('resignation')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+              activeSubModule === 'resignation' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <span>Resignation Archive</span>
+            {resignedEmployees.length > 0 && (
+              <span className="text-[10px] bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 font-bold px-1.5 py-0.5 rounded-full">
+                {resignedEmployees.length}
+              </span>
+            )}
+          </button>
+        )}
+        {hasPerm('MANAGE_BULK_IMPORTS') && (
+          <button 
+            onClick={() => setActiveSubModule('bulk')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'bulk' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Bulk Actions & Mailing
+          </button>
+        )}
+        {hasPerm(['VIEW_ROLES_PERMISSIONS', 'UPDATE_ROLES_PERMISSIONS', 'VIEW_ADMIN']) && (
+          <button 
+            onClick={() => setActiveSubModule('roles')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'roles' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Role & Permissions
+          </button>
+        )}
+        {hasPerm(['VIEW_DEPARTMENTS', 'UPDATE_DEPARTMENTS']) && (
+          <button 
+            onClick={() => setActiveSubModule('departments')}
+            className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
+              activeSubModule === 'departments' 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            Departments
+          </button>
         )}
       </div>
 
