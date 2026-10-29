@@ -459,7 +459,7 @@ const RoleManagementPanel: React.FC<RoleManagementPanelProps> = ({ employees }) 
             >
               <option value="">-- Choose Employee --</option>
               {employees.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.name} ({emp.role} - {emp.department})</option>
+                <option key={emp.id} value={emp.id}>{emp.name} • {emp.department || 'IT'} ({emp.role})</option>
               ))}
             </select>
           </div>
@@ -698,7 +698,7 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
                   >
                     <option value="">-- Select Manager --</option>
                     {employees.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.name}</option>
+                      <option key={emp.id} value={emp.id}>{emp.name} • {emp.department || 'IT'} ({emp.role})</option>
                     ))}
                   </select>
                 </div>
@@ -798,7 +798,7 @@ const DepartmentManagementPanel: React.FC<DepartmentManagementPanelProps> = ({ e
                     >
                       <option value="">-- Choose Head --</option>
                       {employees.map(emp => (
-                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                        <option key={emp.id} value={emp.id}>{emp.name} • {emp.department || 'IT'} ({emp.role})</option>
                       ))}
                     </select>
                   </div>
@@ -2185,8 +2185,8 @@ export const EmployeeManagement: React.FC = () => {
                     <div>
                       <span className="text-[10px] font-bold text-slate-400 block">{emp.id}</span>
                       <h3 className="font-bold text-slate-850 dark:text-white text-sm hover:text-primary transition-colors">{emp.name}</h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{emp.role}</p>
-                      <span className="text-[10px] text-slate-400 font-semibold">{emp.department}</span>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mt-0.5">{emp.department || 'IT'}</p>
+                      <span className="text-[10px] text-slate-400 font-medium">{emp.role}</span>
                     </div>
                   </div>
                   
@@ -2247,8 +2247,8 @@ export const EmployeeManagement: React.FC = () => {
                         </div>
                       </td>
                       <td className="p-4">
-                        <p className="font-semibold">{emp.role}</p>
-                        <p className="text-[10px] text-slate-400">{emp.department}</p>
+                        <p className="font-semibold">{emp.department || 'IT'}</p>
+                        <p className="text-[10px] text-slate-400">{emp.role}</p>
                       </td>
                       <td className="p-4">{emp.location}</td>
                       <td className="p-4">{emp.joiningDate}</td>

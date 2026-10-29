@@ -13,7 +13,8 @@ import {
   TrendingUp,
   Zap
 } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useDepartments } from '../api/hook/useDepartment';
 import { useEmployees, useUpdateEmployeeSalary } from '../api/hook/useEmployee';
 import {
   useApplyBulkRevision,
@@ -102,6 +103,21 @@ export const Payroll: React.FC = () => {
   // 1. Fetch live employees
   const { data: dbEmployeesRes } = useEmployees();
   const dbEmployees = dbEmployeesRes?.data || [];
+
+  // 1b. Fetch live departments
+  const { data: dbDepartmentsRes } = useDepartments();
+  const dbDepartments = dbDepartmentsRes?.data || [];
+
+  // Filtered employees for Bulk Salary Revision preview
+  const filteredBulkEmployees = useMemo(() => {
+    return dbEmployees.filter(emp => {
+      if (bulkDeptFilter === 'ALL') return true;
+      const empDeptId = emp.departmentId || (typeof emp.department === 'object' ? emp.department?.id : null);
+      const empDeptName = (typeof emp.department === 'string' ? emp.department : emp.department?.name || '').toLowerCase();
+      const targetFilter = bulkDeptFilter.toLowerCase();
+      return empDeptId === bulkDeptFilter || empDeptName === targetFilter;
+    });
+  }, [dbEmployees, bulkDeptFilter]);
 
   // 2. Fetch current payroll cycle
   const { data: cycleDetailsRes } = usePayrollCycle(reportMonth, Number(reportYear));
@@ -630,7 +646,9 @@ export const Payroll: React.FC = () => {
                 >
                   <option value="">-- Choose Employee --</option>
                   {dbEmployees.map(e => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.id})</option>
+                    <option key={e.id} value={e.id}>
+                      {e.name} • {e.department?.name || 'IT'} ({e.designation || 'Staff'})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -732,7 +750,9 @@ export const Payroll: React.FC = () => {
                 className="w-full px-3 py-2 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 font-semibold"
               >
                 {dbEmployees.map(e => (
-                  <option key={e.id} value={e.id}>{e.name} ({e.id})</option>
+                  <option key={e.id} value={e.id}>
+                    {e.name} • {e.department?.name || 'IT'} ({e.designation || 'Staff'})
+                  </option>
                 ))}
               </select>
             </div>
@@ -825,7 +845,9 @@ export const Payroll: React.FC = () => {
                 className="px-3 py-1.5 border rounded-lg bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300"
               >
                 {dbEmployees.map(e => (
-                  <option key={e.id} value={e.id}>{e.name} ({e.id})</option>
+                  <option key={e.id} value={e.id}>
+                    {e.name} • {(e.department?.name || (typeof e.department === 'string' ? e.department : '') || 'IT')} ({e.designation || 'Staff'})
+                  </option>
                 ))}
               </select>
               <button 
@@ -1176,7 +1198,16 @@ export const Payroll: React.FC = () => {
                   <tbody className="divide-y text-slate-650 dark:text-slate-350">
                     {runs.length > 0 ? (
                       runs
-                        .filter(run => (run.employee?.name || '').toLowerCase().includes(reportSearch.toLowerCase()))
+                        .filter(run => {
+                          const q = reportSearch.toLowerCase();
+                          const emp = run.employee;
+                          return (
+                            (emp?.name || '').toLowerCase().includes(q) ||
+                            (emp?.id || '').toLowerCase().includes(q) ||
+                            (emp?.designation || '').toLowerCase().includes(q) ||
+                            (emp?.department?.name || '').toLowerCase().includes(q)
+                          );
+                        })
                         .map((run) => {
                           const emp = run.employee;
                           const epfWages = Math.min(run.basic, 15000);
@@ -1184,13 +1215,19 @@ export const Payroll: React.FC = () => {
                           const epfCont = Math.round(epfWages * 0.12);
                           const epsCont = Math.round(epsWages * 0.0833);
                           const diffCont = epfCont - epsCont;
+                          const deptName = emp?.department?.name || 'IT';
                           return (
                             <tr key={run.id} className="hover:bg-slate-50 dark:hover:bg-slate-850">
                               <td className="p-3">
                                 <p className="font-bold text-slate-800 dark:text-white">{emp?.uan || "100293049102"}</p>
                                 <span className="text-[9px] text-slate-400">{emp?.id}</span>
                               </td>
-                              <td className="p-3 font-semibold text-slate-700 dark:text-slate-200">{emp?.name}</td>
+                              <td className="p-3 font-semibold text-slate-700 dark:text-slate-200">
+                                <p className="font-bold text-slate-800 dark:text-white">{emp?.name || 'Staff'}</p>
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  {deptName} • {emp?.designation || 'Staff'}
+                                </span>
+                              </td>
                               <td className="p-3">₹{run.basic.toLocaleString()}</td>
                               <td className="p-3">₹{epfWages.toLocaleString()}</td>
                               <td className="p-3">₹{epsWages.toLocaleString()}</td>
@@ -1203,11 +1240,20 @@ export const Payroll: React.FC = () => {
                         })
                     ) : dbEmployees.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="p-4 text-center text-slate-400">No records found</td>
+                        <td colSpan={9} className="p-8 text-center text-slate-400 font-medium">No employee records found</td>
                       </tr>
                     ) : (
                       dbEmployees
-                        .filter(emp => emp.name.toLowerCase().includes(reportSearch.toLowerCase()))
+                        .filter(emp => {
+                          const q = reportSearch.toLowerCase();
+                          const deptName = (emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || '').toLowerCase();
+                          return (
+                            emp.name.toLowerCase().includes(q) ||
+                            emp.id.toLowerCase().includes(q) ||
+                            (emp.designation || '').toLowerCase().includes(q) ||
+                            deptName.includes(q)
+                          );
+                        })
                         .map((emp) => {
                           const basic = emp.basic || 15000;
                           const epfWages = Math.min(basic, 15000);
@@ -1215,13 +1261,19 @@ export const Payroll: React.FC = () => {
                           const epfCont = Math.round(epfWages * 0.12);
                           const epsCont = Math.round(epsWages * 0.0833);
                           const diffCont = epfCont - epsCont;
+                          const deptName = emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT';
                           return (
                             <tr key={emp.id} className="hover:bg-slate-50 dark:hover:bg-slate-850">
                               <td className="p-3">
                                 <p className="font-bold text-slate-800 dark:text-white">{emp.uan || "100293049102"}</p>
                                 <span className="text-[9px] text-slate-400">{emp.id}</span>
                               </td>
-                              <td className="p-3 font-semibold text-slate-700 dark:text-slate-200">{emp.name}</td>
+                              <td className="p-3 font-semibold text-slate-700 dark:text-slate-200">
+                                <p className="font-bold text-slate-800 dark:text-white">{emp.name}</p>
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  {deptName} • {emp.designation || 'Staff'}
+                                </span>
+                              </td>
                               <td className="p-3">₹{basic.toLocaleString()}</td>
                               <td className="p-3">₹{epfWages.toLocaleString()}</td>
                               <td className="p-3">₹{epsWages.toLocaleString()}</td>
@@ -1272,7 +1324,7 @@ export const Payroll: React.FC = () => {
                   >
                     {dbEmployees.map(emp => (
                       <option key={emp.id} value={emp.id}>
-                        {emp.name} ({emp.designation || 'Staff'})
+                        {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
                       </option>
                     ))}
                   </select>
@@ -1464,11 +1516,10 @@ export const Payroll: React.FC = () => {
                     onChange={(e) => setBulkDeptFilter(e.target.value)}
                     className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-955 text-slate-800 dark:text-slate-200 font-bold focus:outline-none"
                   >
-                    <option value="ALL">All Departments (Entire Company)</option>
-                    <option value="ENGINEERING">Engineering & IT</option>
-                    <option value="SALES">Sales & Marketing</option>
-                    <option value="HR">Human Resources</option>
-                    <option value="FINANCE">Finance & Accounts</option>
+                    <option value="ALL">All Departments (Entire Organization)</option>
+                    {dbDepartments.map(dept => (
+                      <option key={dept.id} value={dept.id}>{dept.name} ({dept.code || 'Dept'})</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1540,7 +1591,7 @@ export const Payroll: React.FC = () => {
               {/* Bulk Revision Preview Table */}
               <div className="space-y-2 pt-2">
                 <span className="font-bold text-slate-700 dark:text-slate-300 text-xs block">
-                  Affected Employees Preview ({dbEmployees.length} Records)
+                  Affected Employees Preview ({filteredBulkEmployees.length} {filteredBulkEmployees.length === 1 ? 'Record' : 'Records'})
                 </span>
 
                 <div className="border rounded-2xl overflow-x-auto scrollbar-none bg-slate-50/50 dark:bg-slate-950/40">
@@ -1555,35 +1606,47 @@ export const Payroll: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y text-slate-650 dark:text-slate-350">
-                      {dbEmployees.slice(0, 5).map((emp) => {
-                        const curBasic = emp.basic || 15000;
-                        const curHra = emp.hra || Math.round(curBasic * 0.4);
-                        const curAllowance = emp.allowance || Math.round(curBasic * 0.2);
-                        const curGross = emp.basic ? (emp.basic + (emp.hra || Math.round(emp.basic * 0.4)) + (emp.allowance || Math.round(emp.basic * 0.2))) : (curBasic + curHra + curAllowance);
+                      {filteredBulkEmployees.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-8 text-center text-slate-400 font-medium">
+                            No employees found matching the selected department filter.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredBulkEmployees.map((emp) => {
+                          const curBasic = emp.basic || 15000;
+                          const curHra = emp.hra || Math.round(curBasic * 0.4);
+                          const curAllowance = emp.allowance || Math.round(curBasic * 0.2);
+                          const curGross = emp.basic ? (emp.basic + (emp.hra || Math.round(emp.basic * 0.4)) + (emp.allowance || Math.round(emp.basic * 0.2))) : (curBasic + curHra + curAllowance);
 
-                        let newGross = curGross;
-                        if (bulkMode === 'percent') {
-                          newGross = Math.round(curGross * (1 + bulkVal / 100));
-                        } else {
-                          newGross = curGross + Number(bulkVal);
-                        }
-                        const diff = newGross - curGross;
+                          let newGross = curGross;
+                          if (bulkMode === 'percent') {
+                            newGross = Math.round(curGross * (1 + bulkVal / 100));
+                          } else {
+                            newGross = curGross + Number(bulkVal);
+                          }
+                          const diff = newGross - curGross;
+                          const deptName = emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT';
 
-                        return (
-                          <tr key={emp.id} className="hover:bg-slate-100/50 dark:hover:bg-slate-900">
-                            <td className="p-3">
-                              <p className="font-bold text-slate-800 dark:text-white">{emp.name}</p>
-                              <span className="text-[9px] text-slate-400">{emp.id}</span>
-                            </td>
-                            <td className="p-3 font-medium">{emp.designation || 'Staff'}</td>
-                            <td className="p-3 font-semibold">₹{curGross.toLocaleString()}</td>
-                            <td className="p-3 font-bold text-indigo-600 dark:text-indigo-400">₹{newGross.toLocaleString()}</td>
-                            <td className="p-3 text-right font-black text-emerald-600 dark:text-emerald-400">
-                              +₹{diff.toLocaleString()} / mo
-                            </td>
-                          </tr>
-                        );
-                      })}
+                          return (
+                            <tr key={emp.id} className="hover:bg-slate-100/50 dark:hover:bg-slate-900 transition-colors">
+                              <td className="p-3">
+                                <p className="font-bold text-slate-800 dark:text-white">{emp.name}</p>
+                                <span className="text-[9px] text-slate-400">{emp.id}</span>
+                              </td>
+                              <td className="p-3">
+                                <span className="font-bold text-slate-800 dark:text-slate-200 block">{deptName}</span>
+                                <span className="text-[10px] text-slate-400 block">{emp.designation || 'Staff'}</span>
+                              </td>
+                              <td className="p-3 font-semibold">₹{curGross.toLocaleString()}</td>
+                              <td className="p-3 font-bold text-indigo-600 dark:text-indigo-400">₹{newGross.toLocaleString()}</td>
+                              <td className="p-3 text-right font-black text-emerald-600 dark:text-emerald-400">
+                                +₹{diff.toLocaleString()} / mo
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>

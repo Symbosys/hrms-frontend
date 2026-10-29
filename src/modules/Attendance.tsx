@@ -201,9 +201,18 @@ export const Attendance: React.FC = () => {
   // Active employee switcher
   const [selectedEmpId, setSelectedEmpId] = useState('');
 
-  // Fetch employees list
+  // Fetch employees list (safeguarded to only include operational staff, never admin accounts)
   const { data: dbEmployeesRes, isLoading: employeesLoading } = useEmployees();
-  const employeesList = dbEmployeesRes?.data || [];
+  const rawEmployeesList = dbEmployeesRes?.data || [];
+  const employeesList = React.useMemo(() => {
+    return rawEmployeesList.filter(emp => {
+      const r = String((emp as any).user?.role?.name || (emp as any).role || '').toUpperCase();
+      if (r.includes('ADMIN') || r.includes('SUPER')) return false;
+      if (emp.name?.startsWith('Admin -')) return false;
+      if (emp.email?.toLowerCase().includes('symbosys.com') || emp.email?.toLowerCase().includes('symbosys2.com') || emp.email?.toLowerCase().includes('technova.com')) return false;
+      return true;
+    });
+  }, [rawEmployeesList]);
 
   // Match logged in user's profile with employee record from DB
   const myEmployee = React.useMemo(() => {
@@ -1055,15 +1064,38 @@ export const Attendance: React.FC = () => {
   const [musterYear, setMusterYear] = useState<number>(new Date().getFullYear());
   const [musterEmpId, setMusterEmpId] = useState<string>('');
 
-  // Keep musterEmpId updated with selectedEmpId if available
-  useEffect(() => {
-    if (selectedEmpId && !musterEmpId) {
-      setMusterEmpId(selectedEmpId);
-    }
-  }, [selectedEmpId, musterEmpId]);
+  // Filtered employees list for Muster Roll dropdown:
+  // When Organization/Admin logs in, show all staff created by them, but exclude organization itself!
+  const filteredMusterStaffList = React.useMemo(() => {
+    return employeesList.filter(emp => {
+      if (isAdmin || isManager) {
+        if (loggedUser) {
+          if (emp.userId && emp.userId === loggedUser.id) return false;
+          if (loggedUser.id && emp.id === loggedUser.id) return false;
+          if (loggedUser.email && emp.email?.toLowerCase() === loggedUser.email?.toLowerCase()) return false;
+          if (loggedUser.employeeId && emp.id === loggedUser.employeeId) return false;
+        }
+        const r = String((emp as any).user?.role?.name || (emp as any).role || '').toUpperCase();
+        if (r.includes('ORGANIZATION ADMIN') || r.includes('SUPER_ADMIN') || r.includes('SUPER ADMIN')) return false;
+        if (emp.email?.toLowerCase() === 'info@symbosys.com') return false;
+      }
+      return true;
+    });
+  }, [employeesList, loggedUser, isAdmin, isManager]);
 
-  const targetMusterEmpId = musterEmpId || selectedEmpId;
-  const targetMusterEmployee = employeesList.find(e => e.id === targetMusterEmpId);
+  // Keep musterEmpId updated with selectedEmpId or first filtered staff if available
+  useEffect(() => {
+    if (isEmployee && myEmpId) {
+      setMusterEmpId(myEmpId);
+    } else if (filteredMusterStaffList.length > 0) {
+      if (!musterEmpId || !filteredMusterStaffList.some(e => e.id === musterEmpId)) {
+        setMusterEmpId(filteredMusterStaffList[0].id);
+      }
+    }
+  }, [filteredMusterStaffList, isEmployee, myEmpId, musterEmpId]);
+
+  const targetMusterEmpId = isEmployee ? (myEmpId || selectedEmpId) : (musterEmpId || (filteredMusterStaffList[0]?.id || selectedEmpId));
+  const targetMusterEmployee = (isEmployee ? myEmployee : null) || filteredMusterStaffList.find(e => e.id === targetMusterEmpId) || employeesList.find(e => e.id === targetMusterEmpId);
 
   // Dynamic day generation for selected month and year
   const daysInMusterMonth = new Date(musterYear, musterMonth + 1, 0).getDate();
@@ -1078,8 +1110,9 @@ export const Attendance: React.FC = () => {
   const dynamicMusterDays: Array<{
     dayNum: number;
     dateStr: string;
-    status: 'Present' | 'Late' | 'Absent' | 'Holiday' | 'WeekOff';
+    status: 'Present' | 'Late' | 'HalfDay' | 'Absent' | 'Holiday' | 'WeekOff';
     punchesCount: number;
+    workedHours?: number;
     regStatus?: string;
   }> = Array.from({ length: daysInMusterMonth }, (_, i) => {
     const dayNum = i + 1;
@@ -1100,7 +1133,8 @@ export const Attendance: React.FC = () => {
       return isEmpMatch && req.date === dateStr;
     });
 
-    let status: 'Present' | 'Late' | 'Absent' | 'Holiday' | 'WeekOff' = 'Present';
+    let status: 'Present' | 'Late' | 'HalfDay' | 'Absent' | 'Holiday' | 'WeekOff' = 'Present';
+    let workedHours: number | undefined = undefined;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1113,11 +1147,38 @@ export const Attendance: React.FC = () => {
       status = 'Present';
     } else if (dayPunches.length > 0) {
       const firstIn = dayPunches.find(p => p.type === 'In');
+      const lastOut = [...dayPunches].reverse().find(p => p.type === 'Out');
+
       if (firstIn) {
-        const inHour = new Date(firstIn.createdAt || Date.now()).getHours();
-        status = inHour >= 10 ? 'Late' : 'Present';
+        const inDate = new Date(firstIn.createdAt || Date.now());
+        const inMins = inDate.getHours() * 60 + inDate.getMinutes();
+        const shiftStartMins = 9 * 60 + 30; // 09:30 AM
+        const lateMins = inMins - shiftStartMins;
+        const isLateOver15 = lateMins > 15;
+        const isLateGrace = lateMins > 0 && lateMins <= 15;
+
+        if (lastOut) {
+          const outDate = new Date(lastOut.createdAt || Date.now());
+          workedHours = Math.max(0, (outDate.getTime() - inDate.getTime()) / (1000 * 60 * 60));
+
+          if (workedHours < 8.0 || isLateOver15) {
+            status = 'HalfDay';
+          } else if (isLateGrace) {
+            status = 'Late';
+          } else {
+            status = 'Present';
+          }
+        } else {
+          if (isLateOver15) {
+            status = 'HalfDay';
+          } else if (isLateGrace) {
+            status = 'Late';
+          } else {
+            status = 'Present';
+          }
+        }
       } else {
-        status = 'Present';
+        status = 'HalfDay';
       }
     } else {
       if (checkDate > today) {
@@ -1128,8 +1189,15 @@ export const Attendance: React.FC = () => {
       }
     }
 
-    return { dayNum, dateStr, status, punchesCount: dayPunches.length, regStatus: dayReg?.status };
+    return { dayNum, dateStr, status, punchesCount: dayPunches.length, workedHours, regStatus: dayReg?.status };
   });
+
+  // Calculate monthly summary counts for target employee
+  const musterPresentCount = dynamicMusterDays.filter(d => d.status === 'Present').length;
+  const musterLateCount = dynamicMusterDays.filter(d => d.status === 'Late').length;
+  const musterHalfDayCount = dynamicMusterDays.filter(d => d.status === 'HalfDay').length;
+  const musterAbsentCount = dynamicMusterDays.filter(d => d.status === 'Absent').length;
+  const musterWeekOffCount = dynamicMusterDays.filter(d => d.status === 'WeekOff' || d.status === 'Holiday').length;
 
   const verifyWithScreenLock = async (): Promise<boolean> => {
     try {
@@ -1402,7 +1470,7 @@ export const Attendance: React.FC = () => {
               ) : (
                 employeesList.map(emp => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.designation || 'Staff'})
+                    {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
                   </option>
                 ))
               )}
@@ -2056,7 +2124,7 @@ export const Attendance: React.FC = () => {
                           <option value="">-- Choose Employee --</option>
                           {employeesList.map(emp => (
                             <option key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.id}) - {emp.designation || 'Staff'}
+                              {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
                             </option>
                           ))}
                         </select>
@@ -2217,7 +2285,7 @@ export const Attendance: React.FC = () => {
                         <option value="">-- Choose Employee --</option>
                         {employeesList.map(emp => (
                           <option key={emp.id} value={emp.id}>
-                            {emp.name} ({emp.id}) - {emp.designation || 'Staff'}
+                            {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
                           </option>
                         ))}
                       </select>
@@ -2258,7 +2326,7 @@ export const Attendance: React.FC = () => {
                             />
                             <div className="flex flex-col">
                               <span className="font-bold text-slate-800 dark:text-slate-200">{emp.name}</span>
-                              <span className="text-[10px] text-slate-400">{emp.id} • {emp.designation || 'Staff'}</span>
+                              <span className="text-[10px] text-slate-400">{emp.id} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})</span>
                             </div>
                           </label>
                         ))}
@@ -2377,7 +2445,7 @@ export const Attendance: React.FC = () => {
                               <div className="truncate">
                                 <span className="font-extrabold text-slate-800 dark:text-white block truncate">{emp.name}</span>
                                 <span className="text-[10px] text-slate-400 block truncate">
-                                  {emp.id} • {emp.designation || 'Staff'}
+                                  {emp.id} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
                                 </span>
                               </div>
                             </div>
@@ -2566,23 +2634,28 @@ export const Attendance: React.FC = () => {
                   Muster Roll Grid — {monthNames[musterMonth]} {musterYear}
                 </h3>
                 <p className="text-slate-400 text-xs mt-0.5">
-                  Showing monthly attendance status for <span className="font-semibold text-slate-700 dark:text-slate-200">{targetMusterEmployee?.name || 'Employee'}</span>
+                  {isEmployee
+                    ? 'Showing your monthly attendance calendar'
+                    : <>Showing monthly attendance status for <span className="font-semibold text-slate-700 dark:text-slate-200">{targetMusterEmployee?.name || 'Employee'}</span></>
+                  }
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                {/* Employee Filter */}
-                <select
-                  value={targetMusterEmpId}
-                  onChange={(e) => setMusterEmpId(e.target.value)}
-                  className="px-3 py-1.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-bold focus:outline-none text-xs"
-                >
-                  {employeesList.map(emp => (
-                    <option key={emp.id} value={emp.id} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
-                      {emp.name} ({emp.designation || 'Staff'})
-                    </option>
-                  ))}
-                </select>
+                {/* Employee Filter: Only for Organization / Admin, and excludes organization itself */}
+                {!isEmployee && filteredMusterStaffList.length > 0 && (
+                  <select
+                    value={targetMusterEmpId}
+                    onChange={(e) => setMusterEmpId(e.target.value)}
+                    className="px-3 py-1.5 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 font-bold focus:outline-none text-xs"
+                  >
+                    {filteredMusterStaffList.map(emp => (
+                      <option key={emp.id} value={emp.id} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                        {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                )}
 
                 {/* Month Selector */}
                 <select
@@ -2624,6 +2697,25 @@ export const Attendance: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* Quick Summary Counts row */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg font-bold text-xs">
+                Present: {musterPresentCount}
+              </span>
+              <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg font-bold text-xs">
+                Late: {musterLateCount}
+              </span>
+              <span className="px-2.5 py-1 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 rounded-lg font-bold text-xs">
+                Half Day: {musterHalfDayCount}
+              </span>
+              <span className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg font-bold text-xs">
+                Absent: {musterAbsentCount}
+              </span>
+              <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg font-bold text-xs">
+                Week Off: {musterWeekOffCount}
+              </span>
+            </div>
             
             {/* Calendar Grid Header */}
             <div className="grid grid-cols-7 gap-2 mt-4">
@@ -2643,16 +2735,17 @@ export const Attendance: React.FC = () => {
                   className={`border rounded-xl p-2.5 text-center flex flex-col justify-between h-16 cursor-pointer hover:border-primary hover:shadow-md transition-all ${
                     d.status === 'Present' ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/40' :
                     d.status === 'Late' ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40' :
+                    d.status === 'HalfDay' ? 'bg-orange-50/60 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900/40' :
                     d.status === 'Absent' ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/40' :
                     d.status === 'Holiday' || d.status === 'WeekOff' ? 'bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40' :
                     'bg-slate-50 dark:bg-slate-950 border-slate-200/80 dark:border-slate-800'
                   }`}
                   onClick={() => {
-                    if (d.status === 'Absent' || d.status === 'Late') {
+                    if (d.status === 'Absent' || d.status === 'Late' || d.status === 'HalfDay') {
                       setRegDate(d.dateStr);
                       setActiveSubModule('regularize');
                     } else {
-                      showAlert(`Date: ${d.dateStr} | Status: ${d.status} | Recorded Punches: ${d.punchesCount}`, "Muster Day Details", "info");
+                      showAlert(`Date: ${d.dateStr} | Status: ${d.status} | Recorded Punches: ${d.punchesCount}${d.workedHours ? ` | Worked: ${d.workedHours.toFixed(1)} hrs` : ''}`, "Muster Day Details", "info");
                     }
                   }}
                 >
@@ -2665,22 +2758,23 @@ export const Attendance: React.FC = () => {
                   <span className={`text-[9px] font-extrabold block uppercase tracking-tight ${
                     d.status === 'Present' ? 'text-emerald-600 dark:text-emerald-400' :
                     d.status === 'Late' ? 'text-amber-600 dark:text-amber-400' :
+                    d.status === 'HalfDay' ? 'text-orange-600 dark:text-orange-400' :
                     d.status === 'Absent' ? 'text-rose-600 dark:text-rose-400' :
                     d.status === 'Holiday' || d.status === 'WeekOff' ? 'text-blue-600 dark:text-blue-400' :
                     'text-slate-400 dark:text-slate-500'
                   }`}>
-                    {d.status}
+                    {d.status === 'HalfDay' ? 'Half Day' : d.status}
                   </span>
                 </div>
               ))}
             </div>
             
             <div className="flex flex-wrap gap-4 items-center mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 justify-center text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>Present</span>
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500"></span>Late</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>Present (&gt;=8h)</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500"></span>Late (Grace 1-15m)</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-orange-500"></span>Half Day (&lt;8h / &gt;15m)</span>
               <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-500"></span>Absent</span>
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>Holiday</span>
-              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-slate-400"></span>WeekOff</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>Holiday / WeekOff</span>
             </div>
           </div>
         </div>

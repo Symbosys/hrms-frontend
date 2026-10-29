@@ -514,7 +514,7 @@ export const Leave: React.FC = () => {
                 >
                   {dbEmployees.map(emp => (
                     <option key={emp.id} value={emp.id}>
-                      {emp.name} ({emp.designation || 'Staff'})
+                      {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
                     </option>
                   ))}
                 </select>
