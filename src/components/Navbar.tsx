@@ -498,8 +498,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
                     const formData = new FormData();
                     formData.append('file', file);
                     formData.append('image', dataUrl);
+                    formData.append('updateSelf', 'true');
 
-                    const res = await api.post('/documents/upload-avatar', formData);
+                    const res = await api.post('/documents/upload-avatar?updateSelf=true', formData);
                     const uploadedUrl = res.data?.data?.url || res.data?.url;
                     if (uploadedUrl) {
                       localStorage.setItem('customAvatar', uploadedUrl);
@@ -513,7 +514,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
                   } catch (apiErr: any) {
                     // If FormData fails, send JSON payload with Base64 image
                     try {
-                      const res = await api.post('/documents/upload-avatar', { image: dataUrl });
+                      const res = await api.post('/documents/upload-avatar', { image: dataUrl, updateSelf: true });
                       const uploadedUrl = res.data?.data?.url || res.data?.url;
                       if (uploadedUrl) {
                         localStorage.setItem('customAvatar', uploadedUrl);
