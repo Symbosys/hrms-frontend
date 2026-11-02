@@ -70,8 +70,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const isRootAdmin = currentUser?.email === 'info@symbosys.com' || 
+                      currentUser?.name?.startsWith('Admin -') || 
+                      currentUser?.email === 'platform@hrms.com' || 
+                      currentUser?.email === 'admin@hrms.com';
+
   const currentUserName = currentUser ? currentUser.name : (userRole === 'Super Admin' ? 'Vikram Malhotra' : userRole === 'HR Admin' ? 'Karan Johar' : userRole === 'Manager' ? 'Neha Patel' : 'Aarav Sharma');
-  const currentUserRoleText = currentUser ? currentUser.role : (userRole === 'Super Admin' ? 'Chief Executive Officer' : userRole === 'HR Admin' ? 'HR Administrator' : userRole === 'Manager' ? 'Engineering Manager' : 'Senior UI Developer');
+  
+  const currentUserRoleText = currentUser?.designation || 
+    (currentUser?.role && currentUser.role !== 'Super Admin' && currentUser.role !== 'SUPER_ADMIN' && currentUser.role !== 'SUPER ADMIN'
+      ? currentUser.role 
+      : (isRootAdmin ? 'Chief Executive Officer' : 'Employee'));
   const customAvatar = localStorage.getItem('customAvatar') || '';
   const currentUserAvatar = (currentUser && currentUser.avatar) 
     ? currentUser.avatar 
@@ -351,7 +360,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
         {/* Role Quick Indicator */}
         <div className="hidden xl:flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300">
           <ShieldAlert className="h-3.5 w-3.5 text-primary" />
-          <span>Role: {userRole}</span>
+          <span>Role: {isRootAdmin ? 'Super Admin' : (currentUserRoleText || userRole)}</span>
         </div>
 
         {/* Theme Toggle */}

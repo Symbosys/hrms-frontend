@@ -40,16 +40,28 @@ export const Login: React.FC = () => {
         onSuccess: (response) => {
           const loggedUser = response.data?.user;
           if (loggedUser) {
-            // Map user role using the database role
-            let role: 'Super Admin' | 'HR Admin' | 'Manager' | 'Employee' = 'Employee';
-            const dbRole = loggedUser.role;
-            if (dbRole === 'SUPER_ADMIN' || dbRole === 'SUPER ADMIN' || loggedUser.name === 'Vikram Malhotra') {
-              role = 'Super Admin';
-            } else if (dbRole === 'HR_ADMIN' || dbRole === 'HR ADMIN' || loggedUser.name === 'Karan Johar' || loggedUser.name === 'Shalini Sen') {
-              role = 'HR Admin';
-            } else if (dbRole === 'MANAGER' || dbRole === 'Manager') {
-              role = 'Manager';
+            // Determine user perspective and role
+            const isRootAdmin = loggedUser.name?.startsWith('Admin -') || 
+                                loggedUser.email === 'info@symbosys.com' || 
+                                loggedUser.email === 'admin@hrms.com' || 
+                                loggedUser.email === 'platform@hrms.com';
+
+            const dbRole = String(loggedUser.role || '').toUpperCase();
+            let perspectiveRole: 'Super Admin' | 'HR Admin' | 'Manager' | 'Employee' = 'Employee';
+
+            if (isRootAdmin || (!loggedUser.employeeId && (dbRole === 'SUPER_ADMIN' || dbRole === 'SUPER ADMIN'))) {
+              perspectiveRole = 'Super Admin';
+            } else if (dbRole.includes('HR') || dbRole.includes('ADMIN')) {
+              perspectiveRole = 'HR Admin';
+            } else if (dbRole.includes('MANAGER') || dbRole.includes('LEAD')) {
+              perspectiveRole = 'Manager';
+            } else {
+              perspectiveRole = 'Employee';
             }
+
+            const assignedDesignation = (loggedUser as any).designation || 
+                                       (loggedUser.role && loggedUser.role !== 'SUPER_ADMIN' && loggedUser.role !== 'SUPER ADMIN' ? loggedUser.role : undefined) ||
+                                       (isRootAdmin ? 'Chief Executive Officer' : 'Employee');
 
             // Find corresponding employee from mock lists/state, or create one:
             const existingEmp = employees.find(emp => emp.email?.toLowerCase() === loggedUser.email?.toLowerCase());
@@ -57,11 +69,11 @@ export const Login: React.FC = () => {
 
             const matchedEmployee = {
               ...(existingEmp || {
-                id: loggedUser.id,
+                id: loggedUser.employeeId || loggedUser.id,
                 name: loggedUser.name || 'New User',
                 email: loggedUser.email || '',
                 phone: loggedUser.phone || '',
-                department: 'Engineering',
+                department: (loggedUser as any).department || 'Engineering',
                 status: 'Active' as const,
                 joiningDate: new Date().toISOString().split('T')[0],
                 location: 'Mumbai',
@@ -74,12 +86,13 @@ export const Login: React.FC = () => {
                 probationDuration: '6 Months', probationEnd: '', confirmationStatus: 'Confirmed' as const
               }),
               avatar: userAvatar,
-              role: role,
+              designation: assignedDesignation,
+              role: assignedDesignation,
               permissions: loggedUser.permissions || [],
             };
 
             setCurrentUser(matchedEmployee as any);
-            setUserRole(role);
+            setUserRole(perspectiveRole);
             setOrganizationId((loggedUser as any).organizationId || null);
             setIsAuthenticated(true);
           } else {
