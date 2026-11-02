@@ -1056,8 +1056,10 @@ export const EmployeeManagement: React.FC = () => {
   const [ratingFeedback, setRatingFeedback] = useState('');
 
   const dbEmployees = (employeesResponse?.data || []).filter(emp => {
-    const roleName = ((emp as any).user?.role?.name || emp.role || '').toUpperCase();
-    return roleName !== 'SUPER_ADMIN' && roleName !== 'SUPER ADMIN';
+    if (emp.name?.startsWith('Admin -')) return false;
+    const emailLower = (emp.email || '').toLowerCase();
+    if (emailLower === 'info@symbosys.com' || emailLower === 'info@symbosys2.com' || emailLower === 'platform@hrms.com') return false;
+    return true;
   });
 
   const employees = dbEmployees.map(emp => {
@@ -1511,6 +1513,16 @@ export const EmployeeManagement: React.FC = () => {
     fatherName: '', permanentAddress: '', languagesSpoken: ''
   });
 
+  // Auto-select default EMPLOYEE role if not selected
+  useEffect(() => {
+    if (orgRoles.length > 0 && !newEmp.roleId) {
+      const empRole = orgRoles.find(r => r.name.toUpperCase() === 'EMPLOYEE' || r.name.toUpperCase() === 'STAFF') || orgRoles[0];
+      if (empRole) {
+        setNewEmp(prev => ({ ...prev, roleId: empRole.id }));
+      }
+    }
+  }, [orgRoles, newEmp.roleId]);
+
   // Exit & Clearance Workflow State
   const [exitResignationDate, setExitResignationDate] = useState('2026-07-01');
   const [exitLastWorkingDay, setExitLastWorkingDay] = useState('2026-07-31');
@@ -1563,12 +1575,11 @@ export const EmployeeManagement: React.FC = () => {
   const [selectedBulkEmpIds, setSelectedBulkEmpIds] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
 
-  // Active employees for standard directory (EXCLUDE Resigned, Terminated & Super Admin accounts)
+  // Active employees for standard directory (EXCLUDE Resigned & Terminated accounts)
   const activeEmployees = employees.filter(emp => 
     emp.status !== 'Resigned' && 
     emp.status !== 'Terminated' &&
-    emp.role.toUpperCase() !== 'SUPER_ADMIN' &&
-    emp.role.toUpperCase() !== 'SUPER ADMIN'
+    !emp.name?.startsWith('Admin -')
   );
   
   // Resigned employees for dedicated Resignation archive
