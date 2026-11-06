@@ -65,7 +65,7 @@ export const Login: React.FC = () => {
 
             // Find corresponding employee from mock lists/state, or create one:
             const existingEmp = employees.find(emp => emp.email?.toLowerCase() === loggedUser.email?.toLowerCase());
-            const userAvatar = (loggedUser as any).avatar || (loggedUser as any).image || existingEmp?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120';
+            const userAvatar = (loggedUser as any).avatar || (loggedUser as any).image || (loggedUser as any).organizationLogo || existingEmp?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120';
 
             const matchedEmployee = {
               ...(existingEmp || {
@@ -86,6 +86,7 @@ export const Login: React.FC = () => {
                 probationDuration: '6 Months', probationEnd: '', confirmationStatus: 'Confirmed' as const
               }),
               avatar: userAvatar,
+              organizationLogo: (loggedUser as any).organizationLogo || null,
               designation: assignedDesignation,
               role: assignedDesignation,
               permissions: loggedUser.permissions || [],

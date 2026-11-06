@@ -82,8 +82,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
       ? currentUser.role 
       : (isRootAdmin ? 'Chief Executive Officer' : 'Employee'));
   const customAvatar = localStorage.getItem('customAvatar') || '';
-  const currentUserAvatar = (currentUser && currentUser.avatar) 
-    ? currentUser.avatar 
+  const currentUserAvatar = (currentUser && (currentUser.avatar || (currentUser as any).organizationLogo)) 
+    ? (currentUser.avatar || (currentUser as any).organizationLogo) 
     : (customAvatar || (userRole === 'Super Admin'
       ? "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=120"
       : userRole === 'HR Admin' 
@@ -514,11 +514,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
                     if (uploadedUrl) {
                       localStorage.setItem('customAvatar', uploadedUrl);
                       if (currentUser) {
-                        setCurrentUser({ ...currentUser, avatar: uploadedUrl });
+                        const updatedUser = { ...currentUser, avatar: uploadedUrl, organizationLogo: uploadedUrl };
+                        setCurrentUser(updatedUser);
+                        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
                       } else {
                         window.dispatchEvent(new Event('storage'));
                       }
-                      showAlert("Profile picture uploaded to Cloudinary successfully!", "Success", "success");
+                      showAlert("Organization profile picture uploaded to Cloudinary successfully!", "Success", "success");
                     }
                   } catch (apiErr: any) {
                     // If FormData fails, send JSON payload with Base64 image
@@ -528,18 +530,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
                       if (uploadedUrl) {
                         localStorage.setItem('customAvatar', uploadedUrl);
                         if (currentUser) {
-                          setCurrentUser({ ...currentUser, avatar: uploadedUrl });
+                          const updatedUser = { ...currentUser, avatar: uploadedUrl, organizationLogo: uploadedUrl };
+                          setCurrentUser(updatedUser);
+                          localStorage.setItem('currentUser', JSON.stringify(updatedUser));
                         } else {
                           window.dispatchEvent(new Event('storage'));
                         }
-                        showAlert("Profile picture uploaded to Cloudinary successfully!", "Success", "success");
+                        showAlert("Organization profile picture uploaded to Cloudinary successfully!", "Success", "success");
                         return;
                       }
                     } catch (jsonErr) {
                       // Fallback to local state if backend is down
                       localStorage.setItem('customAvatar', dataUrl);
                       if (currentUser) {
-                        setCurrentUser({ ...currentUser, avatar: dataUrl });
+                        const updatedUser = { ...currentUser, avatar: dataUrl, organizationLogo: dataUrl };
+                        setCurrentUser(updatedUser);
+                        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
                       } else {
                         window.dispatchEvent(new Event('storage'));
                       }

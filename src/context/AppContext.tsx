@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import apiClient from '../api/apiClient';
 import { ConfirmModal, ModalOptions } from '../components/ConfirmModal';
 import {
   Asset,
@@ -146,6 +147,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     localStorage.setItem('isAuthenticated', String(isAuthenticated));
+    if (isAuthenticated) {
+      apiClient.get('/auth/profile')
+        .then((res: any) => {
+          const u = res.data?.data?.user;
+          if (u) {
+            const avatarUrl = u.avatar || u.image || u.organizationLogo;
+            setCurrentUser((prev: any) => {
+              if (!prev && !avatarUrl) return prev;
+              const updated = {
+                ...(prev || {}),
+                id: u.employeeId || u.id || prev?.id,
+                name: u.name || prev?.name,
+                email: u.email || prev?.email,
+                avatar: avatarUrl || prev?.avatar,
+                organizationLogo: u.organizationLogo || prev?.organizationLogo,
+                role: u.role || prev?.role,
+                designation: u.designation || prev?.designation,
+                permissions: u.permissions || prev?.permissions || [],
+              };
+              localStorage.setItem('currentUser', JSON.stringify(updated));
+              return updated;
+            });
+          }
+        })
+        .catch(() => {});
+    }
   }, [isAuthenticated]);
 
   useEffect(() => {
