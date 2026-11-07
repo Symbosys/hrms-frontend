@@ -159,6 +159,23 @@ export const useUpdateGoalProgress = () => {
 };
 
 /**
+ * Hook to delete a performance goal
+ * DELETE /api/v1/performance/goals/:id
+ */
+export const useDeleteGoal = () => {
+  const queryClient = useQueryClient();
+  return useMutation<BaseResponse<null>, Error, string>({
+    mutationFn: async (id: string) => {
+      const response = await apiClient.delete<BaseResponse<null>>(`/performance/goals/${id}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['performanceGoals'] });
+    },
+  });
+};
+
+/**
  * Hook to retrieve 360 peer & manager feedback reviews
  * GET /api/v1/performance/feedbacks
  */

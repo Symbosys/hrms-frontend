@@ -22,6 +22,7 @@ export interface EmployeeDepartment {
 
 export interface Employee {
   id: string;
+  employeeId?: string | null;
   name: string;
   email: string;
   phone?: string | null;

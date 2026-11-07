@@ -4,6 +4,7 @@ import {
   MessageSquare,
   Plus,
   Star,
+  Trash2,
   UserCheck
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   useBellCurveDistribution,
   useCreateFeedback,
   useCreateGoal,
+  useDeleteGoal,
   useFeedbacks,
   useGoals,
   useSaveAppraisal,
@@ -47,38 +49,108 @@ export const Performance: React.FC = () => {
 
   // Active filters and selectors
   const [selectedEmpId, setSelectedEmpId] = useState('');
-  const [selectedCycle, setSelectedCycle] = useState('2026-Q2');
+  const currentYear = new Date().getFullYear();
+  const availableCycles = [
+    `${currentYear}-Q1`,
+    `${currentYear}-Q2`,
+    `${currentYear}-Q3`,
+    `${currentYear}-Q4`,
+    `${currentYear}-Annual`,
+    `${currentYear - 1}-Annual`,
+  ];
+  const [selectedCycle, setSelectedCycle] = useState(`${currentYear}-Q2`);
 
-  // Fetch employees list
+  // Fetch employees list (filtering out root system super admin account)
   const { data: dbEmployeesRes, isLoading: employeesLoading } = useEmployees();
-  const employeesList = dbEmployeesRes?.data || [];
+  const rawEmployeesList = dbEmployeesRes?.data || [];
+  const employeesList = React.useMemo(() => {
+    return rawEmployeesList.filter(emp => {
+      if (emp.name?.startsWith('Admin -')) return false;
+      const emailLower = (emp.email || '').toLowerCase().trim();
+      if (emailLower === 'info@symbosys.com' || emailLower === 'info@symbosys2.com' || emailLower === 'platform@hrms.com' || emailLower === 'admin@hrms.com') {
+        return false;
+      }
+      return true;
+    });
+  }, [rawEmployeesList]);
 
-  // Automatically select first employee if none selected
+  // Match logged in user's employee profile
+  const myEmployee = React.useMemo(() => {
+    if (!currentUser) return null;
+    const userEmpId = currentUser.employeeId || currentUser.id;
+    return employeesList.find(emp =>
+      (userEmpId && (emp.id === userEmpId || emp.employeeId === userEmpId || emp.userId === userEmpId)) ||
+      (currentUser.email && emp.email?.toLowerCase() === currentUser.email.toLowerCase())
+    ) || null;
+  }, [employeesList, currentUser]);
+
+  // Automatically select employee based on role and availability
   useEffect(() => {
-    if (employeesList.length > 0 && !selectedEmpId) {
+    if (!isAdmin && !isManager && myEmployee) {
+      setSelectedEmpId(myEmployee.id);
+    } else if (employeesList.length > 0 && !selectedEmpId) {
       setSelectedEmpId(employeesList[0].id);
     }
-  }, [employeesList, selectedEmpId]);
+  }, [employeesList, selectedEmpId, isAdmin, isManager, myEmployee]);
 
-  // Fetch performance data
+  // Fetch performance data (filtering out any legacy static seeded goals)
+  const STATIC_GOAL_TITLES = [
+    "Deliver Redesigned Core UI Components",
+    "Optimize Web Performance & Core Web Vitals",
+    "Refactor State Management & Context Architecture",
+  ];
   const { data: goalsRes, isLoading: goalsLoading } = useGoals(selectedEmpId);
-  const goalsList = goalsRes?.data || [];
+  const goalsList = (goalsRes?.data || []).filter(g => !STATIC_GOAL_TITLES.includes(g.title));
 
+  const STATIC_FEEDBACK_TEXTS = [
+    "Excellent technical skillset and outstanding dedication to the UI refactor work.",
+    "Great collaborator, very open to UX critiques and fast at implementing layouts.",
+  ];
   const { data: feedbacksRes, isLoading: feedbacksLoading } = useFeedbacks(selectedEmpId);
-  const feedbacksList = feedbacksRes?.data || [];
+  const feedbacksList = (feedbacksRes?.data || []).filter(f => !STATIC_FEEDBACK_TEXTS.includes(f.text));
 
   const { data: bellCurveRes } = useBellCurveDistribution(selectedCycle);
   const bellCurveData = bellCurveRes?.data || [];
 
+  // Bell Curve Dynamic Metrics
+  const totalRatedStaff = bellCurveData.reduce((acc, p) => acc + (p.Employees || 0), 0);
+  const targetPercentages = [10, 20, 50, 15, 5]; // Standard Bell Curve target percentages for 1 to 5
+  const actualPercentages = bellCurveData.map(p => totalRatedStaff > 0 ? (p.Employees / totalRatedStaff) * 100 : 0);
+  const avgDeviation = totalRatedStaff > 0 
+    ? (actualPercentages.reduce((acc, cur, idx) => acc + Math.abs(cur - (targetPercentages[idx] || 0)), 0) / 5).toFixed(1)
+    : '0.0';
+  const deviationStatus = totalRatedStaff === 0 
+    ? 'No Evaluations Recorded'
+    : Number(avgDeviation) <= 3.5 
+      ? `Normal Range matched (±${avgDeviation}% deviation)`
+      : `Skewed (±${avgDeviation}% deviation from standard)`;
+
   // Form states
   const [goalTitle, setGoalTitle] = useState('');
-  const [goalWeight, setGoalWeight] = useState('30%');
-  const [goalKra, setGoalKra] = useState('Development');
+  const [goalWeight, setGoalWeight] = useState('');
+  const [goalKra, setGoalKra] = useState('');
 
   const [feedbackReviewer, setFeedbackReviewer] = useState('');
   const [feedbackRelation, setFeedbackRelation] = useState<'Manager' | 'Peer' | 'Direct Report'>('Peer');
   const [feedbackRating, setFeedbackRating] = useState(4.0);
   const [feedbackText, setFeedbackText] = useState('');
+
+  // Auto-populate reviewer name with logged-in user's name or first employee from list
+  useEffect(() => {
+    if (employeesList.length > 0 && !feedbackReviewer) {
+      const match = employeesList.find(e => 
+        (currentUser?.id && (e.id === currentUser.id || e.userId === currentUser.id)) ||
+        (currentUser?.email && e.email?.toLowerCase() === currentUser.email?.toLowerCase())
+      );
+      if (match) {
+        setFeedbackReviewer(match.name);
+      } else if (currentUser?.name) {
+        setFeedbackReviewer(currentUser.name);
+      } else {
+        setFeedbackReviewer(employeesList[0].name);
+      }
+    }
+  }, [currentUser, feedbackReviewer, employeesList]);
 
   const [appraisalEmpId, setAppraisalEmpId] = useState('');
   const [appraisalRating, setAppraisalRating] = useState(3);
@@ -93,32 +165,61 @@ export const Performance: React.FC = () => {
   // Mutations
   const createGoalMut = useCreateGoal();
   const updateProgressMut = useUpdateGoalProgress();
+  const deleteGoalMut = useDeleteGoal();
   const createFeedbackMut = useCreateFeedback();
   const saveAppraisalMut = useSaveAppraisal();
+
+  const handleDeleteGoal = (goalId: string, title: string) => {
+    showConfirm({
+      title: "Delete Performance Goal",
+      message: `Are you sure you want to delete the goal "${title}"?`,
+      type: "confirm",
+      confirmText: "Delete",
+      onConfirm: () => {
+        deleteGoalMut.mutate(goalId, {
+          onSuccess: () => {
+            addAuditLog("Deleted Goal", "Performance", `Deleted KRA goal: "${title}"`);
+            showAlert("Performance goal successfully deleted.", "Goal Deleted", "success");
+          },
+          onError: (err: any) => {
+            showAlert(err?.response?.data?.message || err.message || "Failed to delete goal", "Error", "danger");
+          }
+        });
+      }
+    });
+  };
 
   // Progress update buffer
   const [progressUpdates, setProgressUpdates] = useState<{ [key: string]: number }>({});
 
   const handleAddGoal = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEmpId) return;
+    if (!selectedEmpId) {
+      showAlert("Please select an employee to assign this goal.", "Validation Error", "warning");
+      return;
+    }
+
+    const targetEmp = employeesList.find(emp => emp.id === selectedEmpId);
+    const targetName = targetEmp ? targetEmp.name : `Employee (${selectedEmpId})`;
 
     showConfirm({
       title: "Add Performance Goal",
-      message: `Are you sure you want to add goal "${goalTitle}" (${goalWeight} weight) for the selected employee?`,
+      message: `Are you sure you want to add goal "${goalTitle}" for ${targetName}?`,
       type: "confirm",
       confirmText: "Add Goal",
       onConfirm: () => {
         createGoalMut.mutate({
           employeeId: selectedEmpId,
           title: goalTitle,
-          weight: goalWeight,
-          kra: goalKra,
+          weight: goalWeight || '20%',
+          kra: goalKra || 'General',
         }, {
           onSuccess: () => {
-            addAuditLog("Created Goal", "Performance", `Added new KRA goal: "${goalTitle}" for employee ID ${selectedEmpId}`);
+            addAuditLog("Created Goal", "Performance", `Added new KRA goal: "${goalTitle}" for ${targetName}`);
             setGoalTitle('');
-            showAlert("New performance goal successfully added.", "Goal Added", "success");
+            setGoalWeight('');
+            setGoalKra('');
+            showAlert(`New performance goal successfully added for ${targetName}.`, "Goal Added", "success");
           },
           onError: (err: any) => {
             showAlert(err?.response?.data?.message || err.message || "Failed to create goal", "Error", "danger");
@@ -145,7 +246,17 @@ export const Performance: React.FC = () => {
 
   const handleAddFeedback = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEmpId) return;
+    if (!selectedEmpId) {
+      showAlert("Please select the target employee to review.", "Validation Error", "warning");
+      return;
+    }
+    if (!feedbackReviewer) {
+      showAlert("Please select or enter the reviewer name.", "Validation Error", "warning");
+      return;
+    }
+
+    const targetEmp = employeesList.find(emp => emp.id === selectedEmpId);
+    const targetName = targetEmp ? targetEmp.name : `Employee (${selectedEmpId})`;
 
     createFeedbackMut.mutate({
       employeeId: selectedEmpId,
@@ -155,10 +266,9 @@ export const Performance: React.FC = () => {
       text: feedbackText,
     }, {
       onSuccess: () => {
-        addAuditLog("Created Feedback", "Performance", `Submitted ${feedbackRelation} review for employee ID ${selectedEmpId}`);
-        setFeedbackReviewer('');
+        addAuditLog("Created Feedback", "Performance", `Submitted ${feedbackRelation} review for ${targetName} by ${feedbackReviewer}`);
         setFeedbackText('');
-        showAlert("Feedback review successfully submitted.", "Review Submitted", "success");
+        showAlert(`Feedback review successfully submitted for ${targetName}.`, "Review Submitted", "success");
       },
       onError: (err: any) => {
         showAlert(err?.response?.data?.message || err.message || "Failed to submit feedback", "Error", "danger");
@@ -288,7 +398,23 @@ export const Performance: React.FC = () => {
             
             <form onSubmit={handleAddGoal} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-slate-400 font-medium">Goal Title</label>
+                <label className="text-slate-400 font-medium">Assign To Employee *</label>
+                <select
+                  value={selectedEmpId}
+                  onChange={(e) => setSelectedEmpId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold"
+                  required
+                >
+                  {employeesList.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 font-medium">Goal Title *</label>
                 <input 
                   type="text" 
                   value={goalTitle} 
@@ -327,22 +453,30 @@ export const Performance: React.FC = () => {
                 disabled={!selectedEmpId || createGoalMut.isPending}
                 className="w-full py-2 bg-primary text-white rounded-xl font-bold hover:scale-105 transition-all shadow-md disabled:opacity-50 disabled:scale-100"
               >
-                {createGoalMut.isPending ? "Assigning..." : "Assign Goal"}
+                {createGoalMut.isPending ? "Assigning..." : `Assign Goal to ${selectedEmployee?.name ? selectedEmployee.name.split(' ')[0] : 'Employee'}`}
               </button>
             </form>
           </div>
 
           {/* Active Goals list */}
           <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 lg:col-span-2">
-            <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2 flex items-center gap-1.5">
-              <ListTodo className="h-4 w-4 text-violet-500" />
-              <span>Active Performance KRAs ({goalsList.length})</span>
-            </h3>
+            <div className="border-b pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="font-bold text-slate-800 dark:text-white text-sm flex items-center gap-1.5">
+                <ListTodo className="h-4 w-4 text-violet-500" />
+                <span>Active Performance KRAs ({goalsList.length})</span>
+              </h3>
+              {selectedEmployee && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 rounded-lg text-xs font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+                  <span>Active Profile: <strong className="text-slate-900 dark:text-white">{selectedEmployee.name}</strong> • {(selectedEmployee.department?.name || (typeof selectedEmployee.department === 'string' ? selectedEmployee.department : '') || 'IT')}</span>
+                </div>
+              )}
+            </div>
             
             {goalsLoading ? (
               <div className="py-8 text-center text-slate-400 font-medium">Loading goals...</div>
             ) : goalsList.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 font-medium">No performance goals set for this employee.</div>
+              <div className="py-8 text-center text-slate-400 font-medium">No performance goals set for {selectedEmployee?.name || 'this employee'}.</div>
             ) : (
               <div className="space-y-4">
                 {goalsList.map((g) => {
@@ -354,11 +488,22 @@ export const Performance: React.FC = () => {
                           <span className="font-bold text-slate-850 dark:text-white">{g.title}</span>
                           <span className="text-[10px] text-slate-400 block mt-0.5">KRA: {g.kra} • Weight: {g.weight}</span>
                         </div>
-                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${
-                          g.status === 'Completed' ? 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400' : 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-400'
-                        }`}>
-                          {g.status}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                            g.status === 'Completed' ? 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400' : 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-400'
+                          }`}>
+                            {g.status}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteGoal(g.id, g.title)}
+                            disabled={deleteGoalMut.isPending}
+                            title="Delete Goal"
+                            className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-all"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-2">
@@ -411,15 +556,36 @@ export const Performance: React.FC = () => {
             
             <form onSubmit={handleAddFeedback} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-slate-400 font-medium">Reviewer Name</label>
-                <input 
-                  type="text" 
+                <label className="text-slate-400 font-medium">Select Employee to Review *</label>
+                <select
+                  value={selectedEmpId}
+                  onChange={(e) => setSelectedEmpId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold"
+                  required
+                >
+                  {employeesList.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 font-medium">Reviewer Name (Given By) *</label>
+                <select 
                   value={feedbackReviewer} 
                   onChange={(e) => setFeedbackReviewer(e.target.value)}
-                  placeholder="e.g. John Doe" 
                   required 
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-350"
-                />
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold"
+                >
+                  <option value="">-- Select Reviewer --</option>
+                  {employeesList.map(emp => (
+                    <option key={emp.id} value={emp.name}>
+                      {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -464,27 +630,35 @@ export const Performance: React.FC = () => {
 
               <button 
                 type="submit" 
-                disabled={!selectedEmpId || createFeedbackMut.isPending}
+                disabled={!selectedEmpId || !feedbackReviewer || createFeedbackMut.isPending}
                 className="w-full py-2 bg-primary text-white rounded-xl font-bold hover:scale-105 transition-all shadow-md disabled:opacity-50 disabled:scale-100"
               >
-                {createFeedbackMut.isPending ? "Submitting..." : "Submit Review"}
+                {createFeedbackMut.isPending ? "Submitting..." : `Submit Review for ${selectedEmployee?.name ? selectedEmployee.name.split(' ')[0] : 'Employee'}`}
               </button>
             </form>
           </div>
 
           {/* Feedbacks list */}
           <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 lg:col-span-2">
-            <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <UserCheck className="h-4 w-4 text-blue-500" />
-                <span>360-Degree Peer & Manager Feedback ({feedbacksList.length})</span>
-              </span>
-            </h3>
+            <div className="border-b pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="font-bold text-slate-800 dark:text-white text-sm flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <UserCheck className="h-4 w-4 text-blue-500" />
+                  <span>360-Degree Peer & Manager Feedback ({feedbacksList.length})</span>
+                </span>
+              </h3>
+              {selectedEmployee && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 rounded-lg text-xs font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Showing reviews for: <strong className="text-slate-900 dark:text-white">{selectedEmployee.name}</strong> • {(selectedEmployee.department?.name || (typeof selectedEmployee.department === 'string' ? selectedEmployee.department : '') || 'IT')}</span>
+                </div>
+              )}
+            </div>
 
             {feedbacksLoading ? (
               <div className="py-8 text-center text-slate-400 font-medium">Loading reviews...</div>
             ) : feedbacksList.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 font-medium">No reviews submitted for this employee.</div>
+              <div className="py-8 text-center text-slate-400 font-medium">No reviews submitted for {selectedEmployee?.name || 'this employee'} yet.</div>
             ) : (
               <div className="space-y-4">
                 {feedbacksList.map((f) => (
@@ -529,8 +703,11 @@ export const Performance: React.FC = () => {
                 onChange={(e) => setSelectedCycle(e.target.value)}
                 className="px-3.5 py-1.5 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold focus:outline-none"
               >
-                <option value="2026-Q2">2026 Q2 Review</option>
-                <option value="2026-Annual">2026 Annual Appraisal</option>
+                {availableCycles.map(c => (
+                  <option key={c} value={c}>
+                    {c.includes('Annual') ? `${c.replace('-Annual', '')} Annual Appraisal` : `${c.split('-')[0]} ${c.split('-')[1]} Review`}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -566,12 +743,14 @@ export const Performance: React.FC = () => {
                   </div>
                   <div>
                     <span className="text-slate-400">Actual Deviation</span>
-                    <p className="font-semibold text-emerald-500">Normal Range matched (&lt;3% error)</p>
+                    <p className={`font-semibold ${Number(avgDeviation) <= 3.5 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                      {deviationStatus}
+                    </p>
                   </div>
                   <div>
                     <span className="text-slate-400">Total Rated Staff</span>
                     <p className="font-semibold text-slate-800 dark:text-white">
-                      {employeesList.length} employees
+                      {totalRatedStaff} of {employeesList.length} employees evaluated ({employeesList.length > 0 ? Math.round((totalRatedStaff / employeesList.length) * 100) : 0}%)
                     </p>
                   </div>
                 </div>

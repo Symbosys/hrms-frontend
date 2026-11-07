@@ -1048,7 +1048,17 @@ export const EmployeeManagement: React.FC = () => {
 
   // Add Performance Rating Modal State
   const [showAddRatingModal, setShowAddRatingModal] = useState(false);
-  const [ratingMonth, setRatingMonth] = useState('July 2026');
+  const currentMonthYear = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const [ratingMonth, setRatingMonth] = useState(currentMonthYear);
+  const ratingRecentMonths = React.useMemo(() => {
+    const list: string[] = [];
+    const date = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(date.getFullYear(), date.getMonth() - i, 1);
+      list.push(d.toLocaleString('en-US', { month: 'long', year: 'numeric' }));
+    }
+    return list;
+  }, []);
   const [ratingScore, setRatingScore] = useState<number>(4.5);
   const [ratingStatus, setRatingStatus] = useState('EXCEEDS EXPECTATIONS');
   const [ratingTasks, setRatingTasks] = useState('95%');
@@ -1134,6 +1144,7 @@ export const EmployeeManagement: React.FC = () => {
   const { data: salaryResponse } = useEmployeeSalary(activeEmployee?.id);
   const { data: personalResponse } = useEmployeePersonal(activeEmployee?.id);
   const { data: feedbackResponse } = useFeedbacks(activeEmployee?.id);
+  void feedbackResponse;
   const createFeedbackMutation = useCreateFeedback();
   const { data: monthlyRatingsResponse } = useMonthlyRatings(activeEmployee?.id);
   const createMonthlyRatingMutation = useCreateMonthlyRating();
@@ -1438,12 +1449,17 @@ export const EmployeeManagement: React.FC = () => {
       givenBy: 'Super Admin'
     };
 
+    const staticFeedbackKeywords = [
+      "Consistently delivered milestones on schedule with zero critical bugs.",
+      "Great effort on API optimization and database indexing.",
+      "Great effort on API optimization and unit test coverage.",
+      "Recognized for initiative, mentoring, and technical excellence.",
+      "Outstanding project execution and leadership in team delivery.",
+    ];
+
     setEmpRatingsMap(prev => {
-      const existing = prev[activeEmployee.id] || [
-        { month: "July 2026", rating: 4.6, status: "EXCEEDS EXPECTATIONS", tasks: "98%", quality: "4.7/5", teamwork: "4.6/5", feedback: "Outstanding project execution and leadership in team delivery.", givenBy: "Super Admin" },
-        { month: "June 2026", rating: 4.5, status: "EXCEEDS EXPECTATIONS", tasks: "95%", quality: "4.5/5", teamwork: "4.5/5", feedback: "Consistently delivered code reviews on time with zero high bugs.", givenBy: "Super Admin" },
-        { month: "May 2026", rating: 4.2, status: "MEETS EXPECTATIONS", tasks: "91%", quality: "4.2/5", teamwork: "4.3/5", feedback: "Great effort on API optimization and database indexing.", givenBy: "Super Admin" }
-      ];
+      const existing = (prev[activeEmployee.id] || [])
+        .filter((r: any) => !staticFeedbackKeywords.includes(r.feedback || '') && !r.feedback?.startsWith("Outstanding performance in "));
       return {
         ...prev,
         [activeEmployee.id]: [newRatingObj, ...existing]
@@ -3360,40 +3376,42 @@ export const EmployeeManagement: React.FC = () => {
             })()}
 
             {profileTab === 'performance' && (() => {
-              const apiMonthlyRatings = (monthlyRatingsResponse?.data || []).map(r => ({
-                month: r.month,
-                rating: r.rating,
-                status: r.status,
-                tasks: r.tasks,
-                quality: r.quality,
-                teamwork: r.teamwork,
-                feedback: r.feedback || '',
-                givenBy: r.givenBy || 'Super Admin'
-              }));
-
-              const apiFeedbacks = (feedbackResponse?.data || []).map(f => ({
-                month: f.date || 'July 2026',
-                rating: f.rating,
-                status: f.rating >= 4.8 ? 'OUTSTANDING' : f.rating >= 4.2 ? 'EXCEEDS EXPECTATIONS' : 'MEETS EXPECTATIONS',
-                tasks: '95%',
-                quality: `${f.rating}/5`,
-                teamwork: '4.5/5',
-                feedback: f.text,
-                givenBy: f.reviewer || 'Super Admin'
-              }));
-
-              const storedRatings = empRatingsMap[activeEmployee.id] || empRatingsMap[(activeEmployee as any).employeeId] || [];
-
-              const empSeed = (activeEmployee.id || activeEmployee.name || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 5;
-              const defaultRatings = [
-                { month: "July 2026", rating: Number((4.4 + (empSeed * 0.1)).toFixed(1)), status: "EXCEEDS EXPECTATIONS", tasks: "98%", quality: "4.7/5", teamwork: "4.6/5", feedback: `Outstanding performance in ${activeEmployee.department} team execution.`, givenBy: "Super Admin" },
-                { month: "June 2026", rating: Number((4.3 + (empSeed * 0.1)).toFixed(1)), status: "EXCEEDS EXPECTATIONS", tasks: "95%", quality: "4.5/5", teamwork: "4.5/5", feedback: "Consistently delivered milestones on schedule with zero critical bugs.", givenBy: "Super Admin" },
-                { month: "May 2026", rating: Number((4.1 + (empSeed * 0.1)).toFixed(1)), status: "MEETS EXPECTATIONS", tasks: "91%", quality: "4.2/5", teamwork: "4.3/5", feedback: "Great effort on API optimization and unit test coverage.", givenBy: "Super Admin" },
-                { month: "April 2026", rating: Number((4.6 + (empSeed * 0.05)).toFixed(1)), status: "OUTSTANDING", tasks: "99%", quality: "4.9/5", teamwork: "4.8/5", feedback: "Recognized for initiative, mentoring, and technical excellence.", givenBy: "Super Admin" }
+              const staticFeedbackKeywords = [
+                "Consistently delivered milestones on schedule with zero critical bugs.",
+                "Great effort on API optimization and database indexing.",
+                "Great effort on API optimization and unit test coverage.",
+                "Recognized for initiative, mentoring, and technical excellence.",
+                "Outstanding project execution and leadership in team delivery.",
               ];
 
-              const currentRatings = storedRatings.length > 0 ? storedRatings : (apiMonthlyRatings.length > 0 ? apiMonthlyRatings : (apiFeedbacks.length > 0 ? apiFeedbacks : defaultRatings));
-              const avgScore = (currentRatings.reduce((acc, curr) => acc + curr.rating, 0) / currentRatings.length).toFixed(1);
+              const apiMonthlyRatings = (monthlyRatingsResponse?.data || [])
+                .filter(r => !staticFeedbackKeywords.includes(r.feedback || '') && !r.feedback?.startsWith("Outstanding performance in "))
+                .map(r => ({
+                  month: r.month,
+                  rating: r.rating,
+                  status: r.status,
+                  tasks: r.tasks,
+                  quality: r.quality,
+                  teamwork: r.teamwork,
+                  feedback: r.feedback || '',
+                  givenBy: r.givenBy || 'Super Admin'
+                }));
+
+              const storedRatings = (empRatingsMap[activeEmployee.id] || empRatingsMap[(activeEmployee as any).employeeId] || [])
+                .filter((r: any) => !staticFeedbackKeywords.includes(r.feedback || '') && !r.feedback?.startsWith("Outstanding performance in "));
+
+              // Combine stored ratings and api ratings, deduplicating by month
+              const combinedRatings = [...storedRatings];
+              for (const apiR of apiMonthlyRatings) {
+                if (!combinedRatings.some(c => c.month === apiR.month)) {
+                  combinedRatings.push(apiR);
+                }
+              }
+
+              const currentRatings = combinedRatings;
+              const avgScore = currentRatings.length > 0 
+                ? (currentRatings.reduce((acc, curr) => acc + curr.rating, 0) / currentRatings.length).toFixed(1)
+                : '0.0';
 
               return (
                 <div className="space-y-5 text-xs">
@@ -3407,10 +3425,12 @@ export const EmployeeManagement: React.FC = () => {
                       <div>
                         <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider block">Average Monthly Performance Rating</span>
                         <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-                          {avgScore} / 5.0
-                          <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 rounded-full text-[10px] font-bold">
-                            {Number(avgScore) >= 4.5 ? '★ Star Performer' : Number(avgScore) >= 4.0 ? 'Exceeds Expectations' : 'Meets Expectations'}
-                          </span>
+                          {currentRatings.length > 0 ? `${avgScore} / 5.0` : 'Not Rated Yet'}
+                          {currentRatings.length > 0 && (
+                            <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 rounded-full text-[10px] font-bold">
+                              {Number(avgScore) >= 4.5 ? '★ Star Performer' : Number(avgScore) >= 4.0 ? 'Exceeds Expectations' : 'Meets Expectations'}
+                            </span>
+                          )}
                         </h3>
                       </div>
                     </div>
@@ -3442,7 +3462,16 @@ export const EmployeeManagement: React.FC = () => {
 
                   {/* Monthly Performance Cards */}
                   <div className="space-y-3">
-                    {currentRatings.map((m, idx) => (
+                    {currentRatings.length === 0 ? (
+                      <div className="p-8 border border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/70 dark:bg-slate-950/70 text-center space-y-2">
+                        <Award className="h-8 w-8 text-slate-300 dark:text-slate-600 mx-auto" />
+                        <h4 className="font-bold text-slate-700 dark:text-slate-200 text-sm">No Monthly Performance Ratings Yet</h4>
+                        <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                          No monthly evaluations have been recorded for {activeEmployee.name}. Click "+ Give Performance Rating" above to submit a dynamic evaluation.
+                        </p>
+                      </div>
+                    ) : (
+                      currentRatings.map((m, idx) => (
                       <div key={idx} className="p-4 border border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/70 dark:bg-slate-950/70 hover:border-primary/40 transition-all space-y-3">
                         
                         {/* Card Header */}
@@ -3501,7 +3530,7 @@ export const EmployeeManagement: React.FC = () => {
                         </div>
 
                       </div>
-                    ))}
+                    )))}
                   </div>
 
                 </div>
@@ -5781,12 +5810,9 @@ export const EmployeeManagement: React.FC = () => {
                   onChange={(e) => setRatingMonth(e.target.value)}
                   className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 font-bold text-slate-800 dark:text-white"
                 >
-                  <option value="August 2026">August 2026</option>
-                  <option value="July 2026">July 2026</option>
-                  <option value="June 2026">June 2026</option>
-                  <option value="May 2026">May 2026</option>
-                  <option value="April 2026">April 2026</option>
-                  <option value="March 2026">March 2026</option>
+                  {ratingRecentMonths.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
                 </select>
               </div>
 
