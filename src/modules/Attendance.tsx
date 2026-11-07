@@ -173,43 +173,55 @@ export const Attendance: React.FC = () => {
   const { data: profileRes } = useProfile();
   const loggedUser = profileRes?.data?.user;
 
+  // Organization Chief Executive Officer is Super Admin
+  const isSuperAdmin = loggedUser?.name?.startsWith('Admin -') || 
+                       loggedUser?.email === 'info@symbosys.com' || 
+                       loggedUser?.role === 'SUPER_ADMIN' || 
+                       loggedUser?.role === 'Super Admin' ||
+                       loggedUser?.designation === 'Chief Executive Officer';
+
   const roleStr = (userRole || loggedUser?.role || '').toLowerCase();
-  const isAdmin = roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || loggedUser?.role === 'SUPER_ADMIN' || loggedUser?.role === 'HR_ADMIN' || loggedUser?.role === 'Super Admin' || loggedUser?.role === 'HR Admin';
+  const isAdmin = isSuperAdmin || roleStr.includes('admin') || roleStr.includes('ceo') || roleStr.includes('super') || loggedUser?.role === 'SUPER_ADMIN' || loggedUser?.role === 'HR_ADMIN' || loggedUser?.role === 'Super Admin' || loggedUser?.role === 'HR Admin';
   const isManager = roleStr.includes('manager') || loggedUser?.role === 'MANAGER';
   const isEmployee = !isAdmin && !isManager;
 
   const userPerms: string[] = (loggedUser?.permissions || []).map((p: any) => typeof p === 'string' ? p : p?.name || '');
   const hasPerm = (required: string | string[]) => {
-    if (isAdmin) return true;
+    if (isSuperAdmin) return true;
     if (Array.isArray(required)) {
       return required.some(p => userPerms.includes(p));
     }
     return userPerms.includes(required);
   };
 
-  // Auto redirect employees away from restricted submodules
+  const canAccessRoster = isSuperAdmin || hasPerm(['VIEW_SHIFT_ROSTER', 'UPDATE_SHIFT_ROSTER']);
+
+  // Auto redirect employees away from restricted submodules based on dynamic role permissions
   useEffect(() => {
-    if (activeSubModule === 'roster' && !hasPerm(['VIEW_SHIFT_ROSTER', 'UPDATE_SHIFT_ROSTER'])) {
+    if (activeSubModule === 'roster' && !canAccessRoster) {
       setActiveSubModule('punch');
     } else if (activeSubModule === 'reports' && !hasPerm(['VIEW_ATTENDANCE_REPORTS', 'UPDATE_SHIFT_ROSTER'])) {
       setActiveSubModule('punch');
     } else if (activeSubModule === 'geofence' && !hasPerm(['UPDATE_SHIFT_ROSTER', 'UPDATE_ATTENDANCE'])) {
       setActiveSubModule('punch');
     }
-  }, [activeSubModule, setActiveSubModule, userPerms, isAdmin]);
+  }, [activeSubModule, setActiveSubModule, userPerms, isSuperAdmin, canAccessRoster]);
 
   // Active employee switcher
   const [selectedEmpId, setSelectedEmpId] = useState('');
 
-  // Fetch employees list (safeguarded to only include operational staff, never admin accounts)
+  // Fetch employees list: Include all organization employees (HR, Manager, Engineer, Staff).
+  // Exclude only the root system Super Admin (CEO) account who is the organization head.
   const { data: dbEmployeesRes, isLoading: employeesLoading } = useEmployees();
   const rawEmployeesList = dbEmployeesRes?.data || [];
   const employeesList = React.useMemo(() => {
     return rawEmployeesList.filter(emp => {
-      const r = String((emp as any).user?.role?.name || (emp as any).role || '').toUpperCase();
-      if (r.includes('ADMIN') || r.includes('SUPER')) return false;
+      // Exclude root system Super Admin / CEO account
       if (emp.name?.startsWith('Admin -')) return false;
-      if (emp.email?.toLowerCase().includes('symbosys.com') || emp.email?.toLowerCase().includes('symbosys2.com') || emp.email?.toLowerCase().includes('technova.com')) return false;
+      const emailLower = (emp.email || '').toLowerCase().trim();
+      if (emailLower === 'info@symbosys.com' || emailLower === 'info@symbosys2.com' || emailLower === 'platform@hrms.com' || emailLower === 'admin@hrms.com') {
+        return false;
+      }
       return true;
     });
   }, [rawEmployeesList]);
@@ -1388,7 +1400,7 @@ export const Attendance: React.FC = () => {
         >
           GPS / Selfie Punch
         </button>
-        {(isAdmin || isManager || hasPerm(['VIEW_SHIFT_ROSTER', 'UPDATE_SHIFT_ROSTER'])) && (
+        {canAccessRoster && (
           <button 
             onClick={() => setActiveSubModule('roster')}
             className={`py-3 px-5 text-sm font-semibold border-b-2 transition-all ${
@@ -2124,7 +2136,7 @@ export const Attendance: React.FC = () => {
                           <option value="">-- Choose Employee --</option>
                           {employeesList.map(emp => (
                             <option key={emp.id} value={emp.id}>
-                              {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                              {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'General')} ({emp.designation || (emp as any).role || 'Employee'})
                             </option>
                           ))}
                         </select>
@@ -2285,7 +2297,7 @@ export const Attendance: React.FC = () => {
                         <option value="">-- Choose Employee --</option>
                         {employeesList.map(emp => (
                           <option key={emp.id} value={emp.id}>
-                            {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                            {emp.name} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'General')} ({emp.designation || (emp as any).role || 'Employee'})
                           </option>
                         ))}
                       </select>
@@ -2439,13 +2451,17 @@ export const Attendance: React.FC = () => {
                         <tr key={emp.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/60 transition-colors">
                           <td className="p-3">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-black text-xs shrink-0">
-                                {emp.name?.charAt(0) || 'E'}
-                              </div>
+                              {emp.avatar ? (
+                                <img src={emp.avatar} alt={emp.name} className="w-8 h-8 rounded-xl object-cover ring-1 ring-slate-200 dark:ring-slate-700 shrink-0" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-black text-xs shrink-0">
+                                  {emp.name?.charAt(0) || 'E'}
+                                </div>
+                              )}
                               <div className="truncate">
                                 <span className="font-extrabold text-slate-800 dark:text-white block truncate">{emp.name}</span>
                                 <span className="text-[10px] text-slate-400 block truncate">
-                                  {emp.id} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'IT')} ({emp.designation || 'Staff'})
+                                  {emp.id} • {(emp.department?.name || (typeof emp.department === 'string' ? emp.department : '') || 'General')} ({emp.designation || (emp as any).role || 'Employee'})
                                 </span>
                               </div>
                             </div>
