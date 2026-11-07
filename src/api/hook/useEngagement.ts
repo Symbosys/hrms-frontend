@@ -213,3 +213,41 @@ export const useCreateSurvey = () => {
     },
   });
 };
+
+export const useDeletePost = () => {
+  const queryClient = useQueryClient();
+  return useMutation<BaseResponse<any>, Error, string>({
+    mutationFn: async (postId) => {
+      try {
+        const response = await apiClient.delete<BaseResponse<any>>(`/engagement/posts/${postId}`);
+        return response.data;
+      } catch (err: any) {
+        // Fallback to POST /posts/delete if DELETE method is unrouted or blocked
+        const response = await apiClient.post<BaseResponse<any>>('/engagement/posts/delete', { postId });
+        return response.data;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['engagementPosts'] });
+    },
+  });
+};
+
+export const useDeleteSurvey = () => {
+  const queryClient = useQueryClient();
+  return useMutation<BaseResponse<any>, Error, string>({
+    mutationFn: async (surveyId) => {
+      try {
+        const response = await apiClient.delete<BaseResponse<any>>(`/engagement/surveys/${surveyId}`);
+        return response.data;
+      } catch (err: any) {
+        // Fallback to POST /surveys/delete if DELETE method is unrouted or blocked
+        const response = await apiClient.post<BaseResponse<any>>('/engagement/surveys/delete', { surveyId });
+        return response.data;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['engagementSurveys'] });
+    },
+  });
+};

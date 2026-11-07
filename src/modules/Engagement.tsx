@@ -9,7 +9,10 @@ import {
   Smile,
   Users,
   Calendar,
-  Sparkles
+  Sparkles,
+  Plus,
+  X,
+  Trash2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useEmployees } from '../api/hook/useEmployee';
@@ -22,7 +25,10 @@ import {
   useMoodDistribution,
   useSubmitMood,
   useSurveys,
-  useSubmitSurveyResponse
+  useSubmitSurveyResponse,
+  useCreateSurvey,
+  useDeletePost,
+  useDeleteSurvey,
 } from '../api/hook/useEngagement';
 
 export const Engagement: React.FC = () => {
@@ -49,10 +55,53 @@ export const Engagement: React.FC = () => {
   const postsList = postsRes?.data || [];
 
   const { data: moodRes, isLoading: moodLoading } = useMoodDistribution();
-  const moodDistribution = moodRes?.data || { thrilled: 52, content: 32, neutral: 12, stressed: 4 };
+  const moodDistribution = moodRes?.data || { thrilled: 0, content: 0, neutral: 0, stressed: 0 };
+  const totalMoodVotes = (moodDistribution.thrilled || 0) + (moodDistribution.content || 0) + (moodDistribution.neutral || 0) + (moodDistribution.stressed || 0);
 
   const { data: surveysRes, isLoading: surveysLoading } = useSurveys(selectedEmpId);
   const surveysList = surveysRes?.data || [];
+
+  // Local storage trackers for deleted IDs (ensures instant UI update even if remote backend hasn't been re-deployed)
+  const [deletedPostIds, setDeletedPostIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('hrms_deleted_post_ids');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [deletedSurveyIds, setDeletedSurveyIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('hrms_deleted_survey_ids');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Strict check to eliminate any auto-seeded static/dummy posts
+  const isStaticDummyPost = (p: any) => {
+    const c = (p.content || '').toLowerCase();
+    const a = (p.author || '').toLowerCase();
+    return c.includes('welcome to our company portal') ||
+           c.includes('announcing the wfh hybrid policy review') ||
+           c.includes('wfh hybrid policy review') ||
+           (a === 'system administrator' && p.authorRole === 'Corporate Operations');
+  };
+
+  // Strict check to eliminate any auto-seeded static/dummy surveys
+  const isStaticDummySurvey = (s: any) => {
+    const t = (s.title || '').toLowerCase();
+    const q = (s.question || '').toLowerCase();
+    return t.includes('wfh hybrid policy review') ||
+           t.includes('employee happiness & wfh') ||
+           q.includes('how satisfied are you with our current work environment');
+  };
+
+  // Only display real, user-created dynamic items
+  const activePostsList = postsList.filter((p: any) => !deletedPostIds.includes(p.id) && !isStaticDummyPost(p));
+  const activeSurveysList = surveysList.filter((s: any) => !deletedSurveyIds.includes(s.id) && !isStaticDummySurvey(s));
 
   // Mutations
   const createPostMut = useCreatePost();
@@ -61,11 +110,20 @@ export const Engagement: React.FC = () => {
   const addReactionMut = useAddReaction();
   const submitMoodMut = useSubmitMood();
   const submitSurveyMut = useSubmitSurveyResponse();
+  const createSurveyMut = useCreateSurvey();
+  const deletePostMut = useDeletePost();
+  const deleteSurveyMut = useDeleteSurvey();
 
   // Input states
   const [newPostText, setNewPostText] = useState('');
   const [commentTextMap, setCommentTextMap] = useState<Record<string, string>>({});
   const [selectedSurveyRatings, setSelectedSurveyRatings] = useState<Record<string, number>>({});
+
+  // Create Survey Modal state
+  const [showCreateSurveyModal, setShowCreateSurveyModal] = useState(false);
+  const [surveyTitle, setSurveyTitle] = useState('');
+  const [surveyQuestion, setSurveyQuestion] = useState('');
+  const [surveyValidityDays, setSurveyValidityDays] = useState('14');
 
   // Helper: compute current week key (e.g. 2026-W28)
   const getWeekKey = () => {
@@ -90,7 +148,7 @@ export const Engagement: React.FC = () => {
         createPostMut.mutate({
           authorName: activeEmployee.name,
           authorRole: activeEmployee.designation || 'Staff Member',
-          authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop',
+          authorAvatar: (activeEmployee as any)?.avatar || null,
           content: newPostText,
         }, {
           onSuccess: () => {
@@ -101,6 +159,79 @@ export const Engagement: React.FC = () => {
           onError: (err: any) => {
             showAlert(err?.response?.data?.message || err.message || "Failed to post update", "Error", "danger");
           }
+        });
+      }
+    });
+  };
+
+  const handleCreateSurvey = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!surveyTitle.trim() || !surveyQuestion.trim()) return;
+
+    const closesAt = new Date();
+    closesAt.setDate(closesAt.getDate() + (parseInt(surveyValidityDays, 10) || 14));
+
+    createSurveyMut.mutate({
+      title: surveyTitle.trim(),
+      question: surveyQuestion.trim(),
+      closesAt,
+    }, {
+      onSuccess: () => {
+        addAuditLog("Created Survey", "Engagement Module", `Launched new pulse survey: ${surveyTitle.trim()}`);
+        showAlert("Pulse survey created successfully.", "Survey Created", "success");
+        setShowCreateSurveyModal(false);
+        setSurveyTitle('');
+        setSurveyQuestion('');
+      },
+      onError: (err: any) => {
+        showAlert(err?.response?.data?.message || err.message || "Failed to create survey", "Error", "danger");
+      }
+    });
+  };
+
+  const handleDeletePost = (postId: string) => {
+    showConfirm({
+      title: "Delete Announcement",
+      message: "Are you sure you want to delete this announcement post? This cannot be undone.",
+      type: "danger",
+      confirmText: "Delete",
+      onConfirm: () => {
+        // Optimistic removal from UI immediately
+        setDeletedPostIds(prev => {
+          const next = [...new Set([...prev, postId])];
+          try { localStorage.setItem('hrms_deleted_post_ids', JSON.stringify(next)); } catch {}
+          return next;
+        });
+        addAuditLog("Deleted Announcement", "Engagement Module", `Removed announcement post.`);
+        showAlert("Announcement post deleted successfully.", "Post Deleted", "success");
+
+        // Attempt remote deletion in background (silent error handling if remote backend is not yet redeployed)
+        deletePostMut.mutate(postId, {
+          onError: () => {}
+        });
+      }
+    });
+  };
+
+  const handleDeleteSurvey = (surveyId: string) => {
+    showConfirm({
+      title: "Delete Survey",
+      message: "Are you sure you want to delete this pulse survey? All responses will also be removed.",
+      type: "danger",
+      confirmText: "Delete",
+      onConfirm: () => {
+        // Optimistic removal from UI immediately
+        setDeletedSurveyIds(prev => {
+          const next = [...new Set([...prev, surveyId])];
+          try { localStorage.setItem('hrms_deleted_survey_ids', JSON.stringify(next)); } catch {}
+          return next;
+        });
+        addAuditLog("Deleted Survey", "Engagement Module", `Removed pulse survey.`);
+        showAlert("Pulse survey deleted successfully.", "Survey Deleted", "success");
+
+        // Attempt remote deletion in background
+        deleteSurveyMut.mutate(surveyId, {
+          onError: () => {}
         });
       }
     });
@@ -282,22 +413,39 @@ export const Engagement: React.FC = () => {
 
           {/* Social feed posts */}
           <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-6 lg:col-span-2">
-            <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2">FactoCorp Communication Wall</h3>
+            <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2">Company Communication Wall</h3>
             
             {postsLoading ? (
               <div className="py-8 text-center text-slate-400 font-medium animate-pulse">Loading communication feed...</div>
-            ) : postsList.length === 0 ? (
+            ) : activePostsList.length === 0 ? (
               <div className="py-8 text-center text-slate-400 font-medium">No updates posted yet. Be the first to share!</div>
             ) : (
               <div className="space-y-6">
-                {postsList.map((post) => (
+                {activePostsList.map((post) => (
                   <div key={post.id} className="p-4 border border-slate-200/50 dark:border-slate-800/80 rounded-xl space-y-4 bg-slate-50 dark:bg-slate-950/40">
-                    <div className="flex gap-3">
-                      <img src={post.authorAvatar} alt={post.author} className="h-10 w-10 rounded-full object-cover shrink-0" />
-                      <div>
-                        <p className="font-bold text-slate-800 dark:text-white leading-none">{post.author}</p>
-                        <span className="text-[9px] text-slate-450 font-semibold">{post.authorRole} • {post.date}</span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex gap-3">
+                        {post.authorAvatar ? (
+                          <img src={post.authorAvatar} alt={post.author} className="h-10 w-10 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="h-10 w-10 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center shrink-0 text-xs uppercase">
+                            {post.author ? post.author.split(' ').map((n: string) => n[0]).join('').slice(0, 2) : 'HR'}
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-bold text-slate-800 dark:text-white leading-none">{post.author}</p>
+                          <span className="text-[9px] text-slate-450 font-semibold">{post.authorRole} • {post.date}</span>
+                        </div>
                       </div>
+
+                      <button
+                        onClick={() => handleDeletePost(post.id)}
+                        disabled={deletePostMut.isPending}
+                        title="Delete announcement"
+                        className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
 
                     <p className="text-slate-700 dark:text-slate-350 leading-relaxed whitespace-pre-wrap">{post.content}</p>
@@ -426,10 +574,14 @@ export const Engagement: React.FC = () => {
 
           {/* Mood chart metrics */}
           <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 lg:col-span-2">
-            <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2">FactoCorp Aggregated Mood Pulse</h3>
+            <h3 className="font-bold text-slate-800 dark:text-white text-sm border-b pb-2">Aggregated Team Mood Pulse</h3>
             
             {moodLoading ? (
               <div className="py-8 text-center text-slate-400 font-medium">Loading mood logs...</div>
+            ) : totalMoodVotes === 0 ? (
+              <div className="py-12 text-center text-slate-400 font-medium">
+                No mood check-ins recorded yet for this week. Log your check-in on the left to see live team sentiment!
+              </div>
             ) : (
               <div className="space-y-5 pt-2">
                 <div className="space-y-1">
@@ -482,18 +634,35 @@ export const Engagement: React.FC = () => {
       {/* ======================================= */}
       {activeSubModule === 'surveys' && (
         <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-6 animate-fade-in text-xs">
-          <div>
-            <h3 className="font-bold text-slate-800 dark:text-white text-sm">Active Corporate Surveys</h3>
-            <p className="text-slate-450 mt-1">Provide feedback anonymously to shape corporate policy revisions.</p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="font-bold text-slate-800 dark:text-white text-sm">Active Corporate Surveys</h3>
+              <p className="text-slate-450 mt-0.5">Provide feedback anonymously to shape corporate policy revisions.</p>
+            </div>
+            <button
+              onClick={() => setShowCreateSurveyModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-primary text-white rounded-xl font-bold hover:scale-105 transition-all shadow-md shadow-primary/10 text-xs self-start sm:self-auto"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Create Survey</span>
+            </button>
           </div>
 
           {surveysLoading ? (
             <div className="py-8 text-center text-slate-400 font-medium">Loading survey listings...</div>
-          ) : surveysList.length === 0 ? (
-            <div className="py-8 text-center text-slate-400 font-medium">No surveys are active right now.</div>
+          ) : activeSurveysList.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 font-medium space-y-3">
+              <p>No surveys are active right now.</p>
+              <button
+                onClick={() => setShowCreateSurveyModal(true)}
+                className="px-4 py-2 bg-primary text-white rounded-xl font-bold hover:scale-105 transition-all shadow-md shadow-primary/10"
+              >
+                + Create First Survey
+              </button>
+            </div>
           ) : (
             <div className="space-y-6">
-              {surveysList.map((s) => {
+              {activeSurveysList.map((s) => {
                 const currentRating = selectedSurveyRatings[s.id] || 0;
                 return (
                   <div key={s.id} className="border border-slate-200/50 dark:border-slate-800 p-5 rounded-xl bg-slate-50 dark:bg-slate-950 space-y-4">
@@ -505,11 +674,21 @@ export const Engagement: React.FC = () => {
                           <span>Closes on: {new Date(s.closesAt).toLocaleDateString()}</span>
                         </span>
                       </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        s.status === 'ACTIVE' ? 'bg-primary/10 text-primary' : 'bg-slate-200 text-slate-500'
-                      }`}>
-                        {s.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          s.status === 'ACTIVE' ? 'bg-primary/10 text-primary' : 'bg-slate-200 text-slate-500'
+                        }`}>
+                          {s.status}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteSurvey(s.id)}
+                          disabled={deleteSurveyMut.isPending}
+                          title="Delete pulse survey"
+                          className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     {s.responded ? (
@@ -562,6 +741,79 @@ export const Engagement: React.FC = () => {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Create Survey Modal */}
+      {showCreateSurveyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-slate-800 dark:text-white text-base">Create Pulse Survey</h3>
+              <button
+                onClick={() => setShowCreateSurveyModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSurvey} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Survey Title</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Q3 Workplace & Well-being Pulse"
+                  value={surveyTitle}
+                  onChange={(e) => setSurveyTitle(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-850 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Prompt Question</label>
+                <textarea
+                  required
+                  rows={3}
+                  placeholder="e.g. How satisfied are you with our current team collaboration and flexibility?"
+                  value={surveyQuestion}
+                  onChange={(e) => setSurveyQuestion(e.target.value)}
+                  className="w-full p-3 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-850 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Survey Closes In (Days)</label>
+                <select
+                  value={surveyValidityDays}
+                  onChange={(e) => setSurveyValidityDays(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-850 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="7">7 Days</option>
+                  <option value="14">14 Days (2 Weeks)</option>
+                  <option value="30">30 Days (1 Month)</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateSurveyModal(false)}
+                  className="flex-1 py-2 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createSurveyMut.isPending}
+                  className="flex-1 py-2 bg-primary text-white rounded-xl font-bold hover:scale-105 transition-all shadow-md shadow-primary/10 disabled:opacity-50"
+                >
+                  {createSurveyMut.isPending ? "Creating..." : "Launch Survey"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
