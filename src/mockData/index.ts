@@ -13,6 +13,7 @@ export interface Employee {
   manager: string;
   userId?: string | null;
   designation?: string;
+  shift?: string;
   permissions?: string[];
   
   // Salary Details

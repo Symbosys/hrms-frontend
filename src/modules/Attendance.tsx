@@ -1077,37 +1077,39 @@ export const Attendance: React.FC = () => {
   const [musterEmpId, setMusterEmpId] = useState<string>('');
 
   // Filtered employees list for Muster Roll dropdown:
-  // When Organization/Admin logs in, show all staff created by them, but exclude organization itself!
+  // When Organization/Admin/Manager logs in, show all staff in the organization (excluding only root system super admin account)
   const filteredMusterStaffList = React.useMemo(() => {
     return employeesList.filter(emp => {
-      if (isAdmin || isManager) {
-        if (loggedUser) {
-          if (emp.userId && emp.userId === loggedUser.id) return false;
-          if (loggedUser.id && emp.id === loggedUser.id) return false;
-          if (loggedUser.email && emp.email?.toLowerCase() === loggedUser.email?.toLowerCase()) return false;
-          if (loggedUser.employeeId && emp.id === loggedUser.employeeId) return false;
-        }
-        const r = String((emp as any).user?.role?.name || (emp as any).role || '').toUpperCase();
-        if (r.includes('ORGANIZATION ADMIN') || r.includes('SUPER_ADMIN') || r.includes('SUPER ADMIN')) return false;
-        if (emp.email?.toLowerCase() === 'info@symbosys.com') return false;
+      if (emp.name?.startsWith('Admin -')) return false;
+      const emailLower = (emp.email || '').toLowerCase().trim();
+      if (emailLower === 'info@symbosys.com' || emailLower === 'info@symbosys2.com' || emailLower === 'platform@hrms.com' || emailLower === 'admin@hrms.com') {
+        return false;
       }
       return true;
     });
-  }, [employeesList, loggedUser, isAdmin, isManager]);
+  }, [employeesList]);
 
-  // Keep musterEmpId updated with selectedEmpId or first filtered staff if available
+  // Keep musterEmpId updated with selectedEmpId or first staff member
   useEffect(() => {
     if (isEmployee && myEmpId) {
       setMusterEmpId(myEmpId);
     } else if (filteredMusterStaffList.length > 0) {
       if (!musterEmpId || !filteredMusterStaffList.some(e => e.id === musterEmpId)) {
-        setMusterEmpId(filteredMusterStaffList[0].id);
+        if (selectedEmpId && filteredMusterStaffList.some(e => e.id === selectedEmpId)) {
+          setMusterEmpId(selectedEmpId);
+        } else {
+          setMusterEmpId(filteredMusterStaffList[0].id);
+        }
       }
     }
-  }, [filteredMusterStaffList, isEmployee, myEmpId, musterEmpId]);
+  }, [filteredMusterStaffList, isEmployee, myEmpId, musterEmpId, selectedEmpId]);
 
-  const targetMusterEmpId = isEmployee ? (myEmpId || selectedEmpId) : (musterEmpId || (filteredMusterStaffList[0]?.id || selectedEmpId));
+  const targetMusterEmpId = isEmployee ? (myEmpId || selectedEmpId) : (musterEmpId || (selectedEmpId && filteredMusterStaffList.some(e => e.id === selectedEmpId) ? selectedEmpId : filteredMusterStaffList[0]?.id));
   const targetMusterEmployee = (isEmployee ? myEmployee : null) || filteredMusterStaffList.find(e => e.id === targetMusterEmpId) || employeesList.find(e => e.id === targetMusterEmpId);
+
+  // Dynamically fetch punches for the employee selected in Muster Roll Calendar
+  const { data: targetMusterPunchesRes } = usePunches(targetMusterEmpId);
+  const activeMusterPunches = targetMusterEmpId && targetMusterEmpId === selectedEmpId ? punchLogList : (targetMusterPunchesRes?.data || punchLogList);
 
   // Dynamic day generation for selected month and year
   const daysInMusterMonth = new Date(musterYear, musterMonth + 1, 0).getDate();
@@ -1133,10 +1135,10 @@ export const Attendance: React.FC = () => {
     const dayOfWeek = dateObj.getDay(); // 0 = Sun, 6 = Sat
 
     // Check punches for this employee on this date
-    const dayPunches = punchLogList.filter(log => {
+    const dayPunches = activeMusterPunches.filter(log => {
       if (log.employeeId && log.employeeId !== targetMusterEmpId) return false;
       const logDateStr = log.createdAt ? new Date(log.createdAt).toISOString().split('T')[0] : '';
-      return logDateStr === dateStr || log.time?.includes(`${monthNames[musterMonth].slice(0, 3)} ${dayNum}`);
+      return logDateStr === dateStr || (log.time && log.time.includes(`${monthNames[musterMonth].slice(0, 3)} ${dayNum}`));
     });
 
     // Check regularization requests
@@ -1153,12 +1155,14 @@ export const Attendance: React.FC = () => {
     const checkDate = new Date(musterYear, musterMonth, dayNum);
     checkDate.setHours(0, 0, 0, 0);
 
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      status = 'WeekOff';
-    } else if (dayReg?.status === 'Approved') {
-      status = 'Present';
-    } else if (dayPunches.length > 0) {
-      const firstIn = dayPunches.find(p => p.type === 'In');
+    const isHoliday = (musterMonth === 0 && dayNum === 26) || // Republic Day
+                      (musterMonth === 7 && dayNum === 15) || // Independence Day
+                      (musterMonth === 9 && dayNum === 2) ||  // Gandhi Jayanti
+                      (musterMonth === 11 && dayNum === 25);  // Christmas
+
+    // If punches exist on this day (including Saturday or Sunday or weekdays), calculate presence dynamically!
+    if (dayPunches.length > 0) {
+      const firstIn = dayPunches.find(p => p.type === 'In') || dayPunches[0];
       const lastOut = [...dayPunches].reverse().find(p => p.type === 'Out');
 
       if (firstIn) {
@@ -1169,12 +1173,14 @@ export const Attendance: React.FC = () => {
         const isLateOver15 = lateMins > 15;
         const isLateGrace = lateMins > 0 && lateMins <= 15;
 
-        if (lastOut) {
+        if (lastOut && lastOut !== firstIn) {
           const outDate = new Date(lastOut.createdAt || Date.now());
           workedHours = Math.max(0, (outDate.getTime() - inDate.getTime()) / (1000 * 60 * 60));
 
-          if (workedHours < 8.0 || isLateOver15) {
+          if (workedHours < 4.0) {
             status = 'HalfDay';
+          } else if (isLateOver15) {
+            status = 'Late';
           } else if (isLateGrace) {
             status = 'Late';
           } else {
@@ -1182,16 +1188,21 @@ export const Attendance: React.FC = () => {
           }
         } else {
           if (isLateOver15) {
-            status = 'HalfDay';
-          } else if (isLateGrace) {
             status = 'Late';
           } else {
             status = 'Present';
           }
         }
       } else {
-        status = 'HalfDay';
+        status = 'Present';
       }
+    } else if (dayReg?.status === 'Approved') {
+      status = 'Present';
+      workedHours = 8.0;
+    } else if (isHoliday) {
+      status = 'Holiday';
+    } else if (dayOfWeek === 0 || dayOfWeek === 6) {
+      status = 'WeekOff';
     } else {
       if (checkDate > today) {
         status = 'WeekOff';

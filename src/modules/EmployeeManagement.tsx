@@ -64,6 +64,7 @@ import {
   useUpdateEmployeeSalary
 } from '../api/hook/useEmployee';
 import { useLeaveAllocations } from '../api/hook/useLeave';
+import { usePunches, useRegularizations, useShiftTimings } from '../api/hook/useAttendance';
 import { useCreateFeedback, useCreateMonthlyRating, useFeedbacks, useMonthlyRatings } from '../api/hook/usePerformance';
 import {
   useAssignRole,
@@ -1143,6 +1144,12 @@ export const EmployeeManagement: React.FC = () => {
   const { data: _exitResponse } = useEmployeeExit(selectedExitEmpId || activeEmployee?.id);
   void _exitResponse;
   const { data: leaveAllocResponse } = useLeaveAllocations({ employeeId: activeEmployee?.id });
+  const { data: empPunchesRes } = usePunches(activeEmployee?.id);
+  const { data: empRegularizationsRes } = useRegularizations();
+  const { data: shiftTimingsRes } = useShiftTimings();
+  const punchLogList = empPunchesRes?.data || [];
+  const regularizeRequests = empRegularizationsRes?.data || [];
+  const shiftTimingsList = shiftTimingsRes?.data || [];
 
   const salaryDetails = salaryResponse?.data || activeEmployee;
   const personalDetails = personalResponse?.data || activeEmployee;
@@ -1218,8 +1225,10 @@ export const EmployeeManagement: React.FC = () => {
   const [profileTab, setProfileTab] = useState<'overview' | 'documents' | 'attendance' | 'payroll' | 'leave' | 'performance' | 'assets' | 'family' | 'revision' | 'timeline' | 'notes'>('overview');
 
   // Dynamic Muster Roll Calendar Month & Year State
-  const [musterMonth, setMusterMonth] = useState('July');
-  const [musterYear, setMusterYear] = useState('2026');
+  const now = new Date();
+  const monthsList = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const [musterMonth, setMusterMonth] = useState<string>(() => monthsList[now.getMonth()]);
+  const [musterYear, setMusterYear] = useState<string>(() => String(now.getFullYear()));
 
   // Dynamic Family & Dependent Management State
   const [familyMembersMap, setFamilyMembersMap] = useState<Record<string, Array<{
@@ -2734,174 +2743,302 @@ export const EmployeeManagement: React.FC = () => {
               </div>
             )}
 
-            {profileTab === 'attendance' && (
-              <div className="space-y-6 text-xs">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <h3 className="text-sm font-bold text-slate-800 dark:text-white">Attendance Summary & Muster Roll Calendar</h3>
-                  <span className="text-[10px] text-slate-400 font-medium">Monthly Cycle: July 2026</span>
-                </div>
+            {profileTab === 'attendance' && (() => {
+              const monthIdx = monthsList.indexOf(musterMonth);
+              const yearNum = parseInt(musterYear, 10);
+              const totalDaysInMonth = new Date(yearNum, monthIdx + 1, 0).getDate();
+              const firstDayOfWeek = new Date(yearNum, monthIdx, 1).getDay();
+              const offsetCount = (firstDayOfWeek + 6) % 7;
 
-                {/* Metric Summary Cards */}
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl text-center border">
-                    <p className="text-[10px] text-slate-400 uppercase font-bold">Total Days</p>
-                    <p className="text-xl font-bold mt-1 text-slate-800 dark:text-white">30</p>
-                  </div>
-                  <div className="bg-green-50 dark:bg-green-950/20 p-4 rounded-xl text-center border">
-                    <p className="text-[10px] text-green-600 dark:text-green-400 uppercase font-bold">Present</p>
-                    <p className="text-xl font-bold mt-1 text-green-700 dark:text-green-400">22</p>
-                  </div>
-                  <div className="bg-amber-50 dark:bg-amber-950/20 p-4 rounded-xl text-center border">
-                    <p className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-bold">Leaves</p>
-                    <p className="text-xl font-bold mt-1 text-amber-700 dark:text-amber-400">2</p>
-                  </div>
-                  <div className="bg-red-50 dark:bg-red-950/20 p-4 rounded-xl text-center border">
-                    <p className="text-[10px] text-red-600 dark:text-red-400 uppercase font-bold">Absent</p>
-                    <p className="text-xl font-bold mt-1 text-red-700 dark:text-red-400">0</p>
-                  </div>
-                </div>
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
 
-                {/* Shift Schedule Banner */}
-                <div>
-                  <h4 className="font-bold text-slate-800 dark:text-white mb-2">Assigned Shift Schedule</h4>
-                  <div className="p-3 border rounded-xl bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
-                    <div>
-                      <p className="font-bold text-slate-800 dark:text-white">General Day Shift (G-01)</p>
-                      <p className="text-[10px] text-slate-400">09:30 AM to 06:30 PM • 9 Hours (1 Hr break included)</p>
+              // Active assigned shift schedule
+              const empShift = activeEmployee?.shift;
+              const activeShift = shiftTimingsList.find((s: any) => s.name === empShift || s.code === empShift) || shiftTimingsList[0] || {
+                name: empShift || 'General Day Shift (G-01)',
+                startTime: '09:30 AM',
+                endTime: '06:30 PM',
+              };
+
+              // Parse shift start time (e.g. "09:30 AM" -> minutes from midnight)
+              const parseShiftMinutes = (timeStr: string) => {
+                try {
+                  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+                  if (!match) return 9 * 60 + 30;
+                  let hours = parseInt(match[1], 10);
+                  const mins = parseInt(match[2], 10);
+                  const period = match[3]?.toUpperCase();
+                  if (period === 'PM' && hours < 12) hours += 12;
+                  if (period === 'AM' && hours === 12) hours = 0;
+                  return hours * 60 + mins;
+                } catch {
+                  return 9 * 60 + 30;
+                }
+              };
+
+              const shiftStartMins = parseShiftMinutes(activeShift.startTime || '09:30 AM');
+
+              // Compute days array dynamically from real punches & regularizations
+              const daysData = Array.from({ length: totalDaysInMonth }, (_, i) => {
+                const dayNum = i + 1;
+                const dateStr = `${yearNum}-${String(monthIdx + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                const checkDate = new Date(yearNum, monthIdx, dayNum);
+                checkDate.setHours(0, 0, 0, 0);
+                const dayOfWeek = checkDate.getDay(); // 0 = Sun, 6 = Sat
+
+                // Filter punches for activeEmployee
+                const dayPunches = punchLogList.filter((log: any) => {
+                  if (log.employeeId && log.employeeId !== activeEmployee.id) return false;
+                  const logDateStr = log.createdAt ? new Date(log.createdAt).toISOString().split('T')[0] : '';
+                  return logDateStr === dateStr || (log.time && log.time.includes(`${musterMonth.slice(0, 3)} ${dayNum}`));
+                });
+
+                // Filter regularization
+                const dayReg = regularizeRequests.find((req: any) => {
+                  const isEmpMatch = !req.employeeId || req.employeeId === activeEmployee.id || req.employeeName === activeEmployee.name;
+                  return isEmpMatch && req.date === dateStr;
+                });
+
+                type MusterDayStatus = 'Present' | 'Late' | 'Absent' | 'Holiday' | 'WeekOff' | 'Scheduled';
+                let status: MusterDayStatus = 'Present';
+                let workedHours: number | undefined = undefined;
+                let firstInTimeStr = '';
+                let lastOutTimeStr = '';
+
+                // Gazetted / National holidays check
+                const isHoliday = (monthIdx === 0 && dayNum === 26) || // Republic Day
+                                  (monthIdx === 7 && dayNum === 15) || // Independence Day
+                                  (monthIdx === 9 && dayNum === 2) ||  // Gandhi Jayanti
+                                  (monthIdx === 11 && dayNum === 25);  // Christmas
+
+                if (isHoliday) {
+                  status = 'Holiday';
+                } else if (dayOfWeek === 0 || dayOfWeek === 6) {
+                  if (dayPunches.length > 0) {
+                    status = 'Present';
+                  } else {
+                    status = 'WeekOff';
+                  }
+                } else if (dayReg?.status === 'Approved') {
+                  status = 'Present';
+                  workedHours = 8.0;
+                } else if (dayPunches.length > 0) {
+                  const firstIn = dayPunches.find((p: any) => p.type === 'In') || dayPunches[0];
+                  const lastOut = [...dayPunches].reverse().find((p: any) => p.type === 'Out');
+
+                  if (firstIn) {
+                    const inDate = new Date(firstIn.createdAt || Date.now());
+                    if (!isNaN(inDate.getTime())) {
+                      firstInTimeStr = inDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const inMins = inDate.getHours() * 60 + inDate.getMinutes();
+                      const lateMins = inMins - shiftStartMins;
+                      if (lateMins > 15) {
+                        status = 'Late';
+                      }
+                    }
+
+                    if (lastOut && lastOut !== firstIn) {
+                      const outDate = new Date(lastOut.createdAt || Date.now());
+                      if (!isNaN(outDate.getTime())) {
+                        lastOutTimeStr = outDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        workedHours = Math.max(0, (outDate.getTime() - inDate.getTime()) / (1000 * 60 * 60));
+                      }
+                    }
+                  }
+                } else {
+                  if (checkDate > today) {
+                    status = 'Scheduled';
+                  } else {
+                    status = 'Absent';
+                  }
+                }
+
+                return {
+                  dayNum,
+                  dateStr,
+                  status: status as MusterDayStatus,
+                  punchesCount: dayPunches.length,
+                  workedHours,
+                  firstInTimeStr,
+                  lastOutTimeStr,
+                  regStatus: dayReg?.status,
+                };
+              });
+
+              // Metric counts
+              const presentCount = daysData.filter(d => d.status === 'Present' || d.status === 'Late').length;
+              const leavesCount = daysData.filter(d => d.regStatus === 'Approved').length;
+              const absentCount = daysData.filter(d => d.status === 'Absent').length;
+
+              // CSV Download Function
+              const handleDownloadReport = () => {
+                const header = 'Day,Date,Employee ID,Employee Name,Status,First In,Last Out,Punches Count,Worked Hours\n';
+                const rows = daysData.map(d => 
+                  `${d.dayNum},${d.dateStr},"${activeEmployee.id}","${activeEmployee.name}","${d.status}","${d.firstInTimeStr || '-'}","${d.lastOutTimeStr || '-'}","${d.punchesCount}","${d.workedHours ? d.workedHours.toFixed(1) : '-'}"`
+                ).join('\n');
+                const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${activeEmployee.name.replace(/\s+/g, '_')}_MusterRoll_${musterMonth}_${musterYear}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              };
+
+              return (
+                <div className="space-y-6 text-xs">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-white">Attendance Summary & Muster Roll Calendar</h3>
+                    <span className="text-[10px] text-slate-400 font-medium">Monthly Cycle: {musterMonth} {musterYear}</span>
+                  </div>
+
+                  {/* Metric Summary Cards */}
+                  <div className="grid grid-cols-4 gap-4">
+                    <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl text-center border">
+                      <p className="text-[10px] text-slate-400 uppercase font-bold">Total Days</p>
+                      <p className="text-xl font-bold mt-1 text-slate-800 dark:text-white">{totalDaysInMonth}</p>
                     </div>
-                    <span className="bg-slate-200 dark:bg-slate-800 px-2.5 py-1 rounded-full font-bold text-[10px] text-slate-700 dark:text-slate-300">ROSTERED</span>
-                  </div>
-                </div>
-
-                {/* Muster Roll Calendar Grid */}
-                <div className="border rounded-2xl p-5 bg-slate-50/50 dark:bg-slate-950/40 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-3 gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-800 dark:text-white text-xs">
-                        Muster Roll Calendar - {musterMonth} {musterYear}
-                      </h4>
-                      <p className="text-[10px] text-slate-400">Daily attendance logs for {activeEmployee.name}</p>
+                    <div className="bg-green-50 dark:bg-green-950/20 p-4 rounded-xl text-center border">
+                      <p className="text-[10px] text-green-600 dark:text-green-400 uppercase font-bold">Present</p>
+                      <p className="text-xl font-bold mt-1 text-green-700 dark:text-green-400">{presentCount}</p>
                     </div>
-
-                    {/* Month & Year Selectors */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <select 
-                        value={musterMonth}
-                        onChange={(e) => setMusterMonth(e.target.value)}
-                        className="px-3 py-1.5 border rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-xs cursor-pointer shadow-2xs"
-                      >
-                        {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-
-                      <select 
-                        value={musterYear}
-                        onChange={(e) => setMusterYear(e.target.value)}
-                        className="px-3 py-1.5 border rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-xs cursor-pointer shadow-2xs"
-                      >
-                        {['2024', '2025', '2026', '2027', '2028'].map(y => (
-                          <option key={y} value={y}>{y}</option>
-                        ))}
-                      </select>
-
-                      <button 
-                        onClick={() => alert(`Downloading Muster Roll report for ${activeEmployee.name} (${musterMonth} ${musterYear})...`)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-xl font-semibold hover:scale-105 transition-all text-xs shadow-xs"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Download Report
-                      </button>
+                    <div className="bg-amber-50 dark:bg-amber-950/20 p-4 rounded-xl text-center border">
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-bold">Leaves</p>
+                      <p className="text-xl font-bold mt-1 text-amber-700 dark:text-amber-400">{leavesCount}</p>
+                    </div>
+                    <div className="bg-red-50 dark:bg-red-950/20 p-4 rounded-xl text-center border">
+                      <p className="text-[10px] text-red-600 dark:text-red-400 uppercase font-bold">Absent</p>
+                      <p className="text-xl font-bold mt-1 text-red-700 dark:text-red-400">{absentCount}</p>
                     </div>
                   </div>
 
-                  {/* Dynamic Calendar Grid Logic */}
-                  {(() => {
-                    const monthsList = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                    const monthIdx = monthsList.indexOf(musterMonth);
-                    const yearNum = parseInt(musterYear, 10);
-                    
-                    // Days in month calculation
-                    const totalDays = new Date(yearNum, monthIdx + 1, 0).getDate();
-                    
-                    // First day of the month (0 = Sun, 1 = Mon...)
-                    const firstDay = new Date(yearNum, monthIdx, 1).getDay();
-                    // Offset for Monday-start grid (Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6)
-                    const offsetCount = (firstDay + 6) % 7;
-
-                    return (
-                      <div className="grid grid-cols-7 gap-2">
-                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(w => (
-                          <div key={w} className="text-center font-bold text-slate-400 py-1 text-[11px]">{w}</div>
-                        ))}
-                        
-                        {/* Render blank offset spaces */}
-                        {Array.from({ length: offsetCount }).map((_, idx) => (
-                          <div key={`offset-${idx}`} className="py-2 border border-transparent"></div>
-                        ))}
-
-                        {/* Render Days */}
-                        {Array.from({ length: totalDays }, (_, i) => {
-                          const dayNum = i + 1;
-                          const currentDayOfWeek = new Date(yearNum, monthIdx, dayNum).getDay();
-                          
-                          let status: 'Present' | 'Late' | 'Absent' | 'Holiday' | 'WeekOff' = 'Present';
-                          
-                          if (currentDayOfWeek === 0 || currentDayOfWeek === 6) {
-                            status = 'WeekOff';
-                          } else if (dayNum === 10) {
-                            status = 'Absent';
-                          } else if (dayNum === 14 || dayNum === 22) {
-                            status = 'Late';
-                          } else if (dayNum === 15) {
-                            status = 'Holiday';
-                          }
-
-                          return (
-                            <div 
-                              key={dayNum} 
-                              className={`border rounded-xl p-2 text-center flex flex-col justify-between h-14 cursor-pointer hover:border-primary transition-all shadow-2xs ${
-                                status === 'Present' ? 'bg-green-50/70 dark:bg-green-950/20 border-green-200 dark:border-green-900/40' :
-                                status === 'Late' ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40' :
-                                status === 'Absent' ? 'bg-red-50/70 dark:bg-red-950/20 border-red-200 dark:border-red-900/40 animate-pulse' :
-                                status === 'Holiday' ? 'bg-blue-50/70 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40' :
-                                'bg-slate-100/60 dark:bg-slate-900 border-slate-200 dark:border-slate-800'
-                              }`}
-                              onClick={() => {
-                                alert(`Date: ${musterMonth} ${dayNum}, ${musterYear}\nEmployee: ${activeEmployee.name}\nStatus: ${status}`);
-                              }}
-                            >
-                              <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">{dayNum}</span>
-                              <span className={`text-[8px] font-extrabold block uppercase tracking-wider ${
-                                status === 'Present' ? 'text-green-600 dark:text-green-400' :
-                                status === 'Late' ? 'text-amber-600 dark:text-amber-400' :
-                                status === 'Absent' ? 'text-red-600 dark:text-red-400' :
-                                status === 'Holiday' ? 'text-blue-600 dark:text-blue-400' :
-                                'text-slate-400'
-                              }`}>
-                                {status === 'Present' ? 'PRESENT' :
-                                 status === 'Late' ? 'LATE' :
-                                 status === 'Absent' ? 'ABSENT' :
-                                 status === 'Holiday' ? 'HOLIDAY' : 'WEEK OFF'}
-                              </span>
-                            </div>
-                          );
-                        })}
+                  {/* Shift Schedule Banner */}
+                  <div>
+                    <h4 className="font-bold text-slate-800 dark:text-white mb-2">Assigned Shift Schedule</h4>
+                    <div className="p-3 border rounded-xl bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-slate-800 dark:text-white">{activeShift.name || 'General Day Shift (G-01)'}</p>
+                        <p className="text-[10px] text-slate-400">{activeShift.startTime} to {activeShift.endTime} • Assigned Shift Schedule</p>
                       </div>
-                    );
-                  })()}
-                  
-                  {/* Legend Footer */}
-                  <div className="flex gap-4 items-center mt-3 pt-3 border-t justify-center text-[10px] font-medium text-slate-500 dark:text-slate-400 flex-wrap">
-                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-green-500"></span>Present</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500"></span>Late</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>Absent</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>Holiday</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-slate-400"></span>Week Off</span>
+                      <span className="bg-slate-200 dark:bg-slate-800 px-2.5 py-1 rounded-full font-bold text-[10px] text-slate-700 dark:text-slate-300">ROSTERED</span>
+                    </div>
+                  </div>
+
+                  {/* Muster Roll Calendar Grid */}
+                  <div className="border rounded-2xl p-5 bg-slate-50/50 dark:bg-slate-950/40 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-3 gap-3">
+                      <div>
+                        <h4 className="font-bold text-slate-800 dark:text-white text-xs">
+                          Muster Roll Calendar - {musterMonth} {musterYear}
+                        </h4>
+                        <p className="text-[10px] text-slate-400">Daily attendance logs for {activeEmployee.name}</p>
+                      </div>
+
+                      {/* Month & Year Selectors */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <select 
+                          value={musterMonth}
+                          onChange={(e) => setMusterMonth(e.target.value)}
+                          className="px-3 py-1.5 border rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-xs cursor-pointer shadow-2xs"
+                        >
+                          {monthsList.map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+
+                        <select 
+                          value={musterYear}
+                          onChange={(e) => setMusterYear(e.target.value)}
+                          className="px-3 py-1.5 border rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-primary text-xs cursor-pointer shadow-2xs"
+                        >
+                          {['2024', '2025', '2026', '2027', '2028'].map(y => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+
+                        <button 
+                          onClick={handleDownloadReport}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-xl font-semibold hover:scale-105 transition-all text-xs shadow-xs"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download Report
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Dynamic Calendar Grid */}
+                    <div className="grid grid-cols-7 gap-2">
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(w => (
+                        <div key={w} className="text-center font-bold text-slate-400 py-1 text-[11px]">{w}</div>
+                      ))}
+                      
+                      {/* Render blank offset spaces */}
+                      {Array.from({ length: offsetCount }).map((_, idx) => (
+                        <div key={`offset-${idx}`} className="py-2 border border-transparent"></div>
+                      ))}
+
+                      {/* Render Days */}
+                      {daysData.map((d) => (
+                        <div 
+                          key={d.dayNum} 
+                          className={`border rounded-xl p-2 text-center flex flex-col justify-between h-14 cursor-pointer hover:border-primary transition-all shadow-2xs ${
+                            d.status === 'Present' ? 'bg-green-50/70 dark:bg-green-950/20 border-green-200 dark:border-green-900/40' :
+                            d.status === 'Late' ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40' :
+                            d.status === 'Absent' ? 'bg-red-50/70 dark:bg-red-950/20 border-red-200 dark:border-red-900/40 animate-pulse' :
+                            d.status === 'Holiday' ? 'bg-blue-50/70 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40' :
+                            'bg-slate-100/60 dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                          }`}
+                          onClick={() => {
+                            const details = [
+                              `Date: ${musterMonth} ${d.dayNum}, ${musterYear}`,
+                              `Employee: ${activeEmployee.name} (${activeEmployee.id})`,
+                              `Status: ${d.status === 'Scheduled' ? 'Scheduled (Upcoming)' : d.status}`,
+                              d.firstInTimeStr ? `First In: ${d.firstInTimeStr}` : null,
+                              d.lastOutTimeStr ? `Last Out: ${d.lastOutTimeStr}` : null,
+                              d.punchesCount > 0 ? `Total Punches: ${d.punchesCount}` : null,
+                              d.workedHours ? `Worked: ${d.workedHours.toFixed(1)} hrs` : null,
+                              d.regStatus ? `Regularization: ${d.regStatus}` : null
+                            ].filter(Boolean).join('\n');
+                            alert(details);
+                          }}
+                        >
+                          <div className="flex justify-between items-center px-0.5">
+                            <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">{d.dayNum}</span>
+                            {d.punchesCount > 0 && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title={`${d.punchesCount} punches`}></span>
+                            )}
+                          </div>
+                          <span className={`text-[8px] font-extrabold block uppercase tracking-wider ${
+                            d.status === 'Present' ? 'text-green-600 dark:text-green-400' :
+                            d.status === 'Late' ? 'text-amber-600 dark:text-amber-400' :
+                            d.status === 'Absent' ? 'text-red-600 dark:text-red-400' :
+                            d.status === 'Holiday' ? 'text-blue-600 dark:text-blue-400' :
+                            'text-slate-400'
+                          }`}>
+                            {d.status === 'Present' ? 'PRESENT' :
+                             d.status === 'Late' ? 'LATE' :
+                             d.status === 'Absent' ? 'ABSENT' :
+                             d.status === 'Holiday' ? 'HOLIDAY' :
+                             d.status === 'Scheduled' ? 'UPCOMING' : 'WEEK OFF'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Legend Footer */}
+                    <div className="flex gap-4 items-center mt-3 pt-3 border-t justify-center text-[10px] font-medium text-slate-500 dark:text-slate-400 flex-wrap">
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-green-500"></span>Present</span>
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500"></span>Late</span>
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>Absent</span>
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>Holiday</span>
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-slate-400"></span>Week Off / Upcoming</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {profileTab === 'payroll' && (
               <div className="space-y-4 text-xs">
